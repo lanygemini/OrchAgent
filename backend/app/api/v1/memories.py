@@ -65,7 +65,7 @@ async def create_knowledge(data: KnowledgeMemoryCreate, db: AsyncSession = Depen
         key=data.key,
         content=data.content,
         content_type=data.content_type,
-        metadata=data.metadata,
+        meta=data.metadata,
     )
     db.add(km)
     await db.flush()

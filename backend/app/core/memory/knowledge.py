@@ -34,7 +34,7 @@ class KnowledgeMemoryStore:
         if existing:
             existing.content = content
             existing.content_type = content_type
-            existing.metadata = metadata or {}
+            existing.meta = metadata or {}
             existing.embedding = embedding
             existing.version += 1
             await self.db.flush()
@@ -46,7 +46,7 @@ class KnowledgeMemoryStore:
                 key=key,
                 content=content,
                 content_type=content_type,
-                metadata=metadata or {},
+                meta=metadata or {},
                 embedding=embedding,
                 version=1,
             )

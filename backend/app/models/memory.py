@@ -31,5 +31,5 @@ class KnowledgeMemory(Base, UUIDMixin, TimestampMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(String(32), default="text")
     embedding: Mapped[list] = mapped_column(JSON, nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    meta: Mapped[dict] = mapped_column("meta", JSON, default=dict)
     version: Mapped[int] = mapped_column(Integer, default=1)                         # 版本号（写入时递增）
