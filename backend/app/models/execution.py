@@ -5,7 +5,7 @@ from app.db.base import Base, UUIDMixin, TimestampMixin
 from datetime import datetime
 
 
-class WorkflowExecution(Base, UUIDMixin):
+class WorkflowExecution(Base, UUIDMixin, TimestampMixin):
     """工作流执行记录 — 记录一次完整的执行过程"""
     __tablename__ = "workflow_executions"
 
