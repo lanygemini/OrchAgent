@@ -93,7 +93,7 @@ class ExecutionEngine:
                 "workflow_name": ctx.workflow_name,
             })
 
-            dag = self._build_dag_from_workflow(execution.workflow_id)
+            dag = await self._build_dag_from_workflow(execution.workflow_id)
             graph = self.compiler.compile(dag)
 
             initial_state: AgentState = {
@@ -139,9 +139,50 @@ class ExecutionEngine:
             await self.db.flush()
             self._active_tasks.pop(ctx.execution_id, None)
 
-    def _build_dag_from_workflow(self, workflow_id: str) -> DAGDefinition:
-        """从数据库工作流构建 DAG 定义（待实现：从 WorkflowNode/Edge 组装）"""
-        return DAGDefinition(nodes=[], edges=[], start_node_id="")
+    async def _build_dag_from_workflow(self, workflow_id: str) -> DAGDefinition:
+        from sqlalchemy import select
+        from app.models.workflow import Workflow as WF, WorkflowNode, WorkflowEdge
+
+        result = await self.db.execute(select(WF).where(WF.id == workflow_id))
+        wf = result.scalar_one_or_none()
+        if not wf:
+            return DAGDefinition(nodes=[], edges=[], start_node_id="")
+
+        nodes = [
+            DAGNode(
+                id=node.id,
+                type=node.type,
+                label=node.label,
+                config=node.config or {},
+                position_x=node.position_x,
+                position_y=node.position_y,
+                agent_id=node.agent_id,
+                tool_id=node.tool_id,
+            )
+            for node in wf.nodes
+        ]
+        db_node_ids = {n.id for n in wf.nodes}
+
+        edges = []
+        for edge in wf.edges:
+            edge_source = edge.source_node_id
+            edge_target = edge.target_node_id
+            if edge_source not in db_node_ids or edge_target not in db_node_ids:
+                edge_source = next((n.id for n in wf.nodes if n.label == edge_source or getattr(n, "client_id", None) == edge_source), edge_source)
+                edge_target = next((n.id for n in wf.nodes if n.label == edge_target or getattr(n, "client_id", None) == edge_target), edge_target)
+            edges.append(DAGEdge(
+                id=edge.id,
+                source_node_id=edge_source,
+                target_node_id=edge_target,
+                condition_expr=edge.condition_expr,
+                label=edge.label,
+            ))
+
+        start_id = wf.start_node_id or ""
+        if start_id not in db_node_ids:
+            start_id = next((n.id for n in wf.nodes if n.label == start_id or getattr(n, "client_id", None) == start_id), start_id)
+
+        return DAGDefinition(nodes=nodes, edges=edges, start_node_id=start_id)
 
     async def pause(self, execution_id: str):
         """暂停执行（取消当前任务并标记状态）"""

@@ -22,6 +22,7 @@ async def create_workflow(data: WorkflowCreate, db: AsyncSession = Depends(get_d
     db.add(workflow)
     await db.flush()
 
+    node_map: dict[str, str] = {}
     for node_data in data.dag.nodes:
         node = WorkflowNode(
             workflow_id=workflow.id,
@@ -34,18 +35,20 @@ async def create_workflow(data: WorkflowCreate, db: AsyncSession = Depends(get_d
             tool_id=node_data.tool_id,
         )
         db.add(node)
+        await db.flush()
+        node_map[node_data.id] = node.id
 
     for edge_data in data.dag.edges:
         edge = WorkflowEdge(
             workflow_id=workflow.id,
-            source_node_id=edge_data.source_node_id,
-            target_node_id=edge_data.target_node_id,
+            source_node_id=node_map.get(edge_data.source_node_id, edge_data.source_node_id),
+            target_node_id=node_map.get(edge_data.target_node_id, edge_data.target_node_id),
             condition_expr=edge_data.condition_expr,
             label=edge_data.label,
         )
         db.add(edge)
 
-    workflow.start_node_id = data.dag.start_node_id
+    workflow.start_node_id = node_map.get(data.dag.start_node_id, data.dag.start_node_id)
     await db.flush()
     await db.refresh(workflow)
     return workflow
@@ -107,6 +110,7 @@ async def update_workflow(workflow_id: str, data: WorkflowUpdate, db: AsyncSessi
         for edge in workflow.edges:
             await db.delete(edge)
 
+        node_map: dict[str, str] = {}
         for node_data in data.dag.nodes:
             node = WorkflowNode(
                 workflow_id=workflow.id,
@@ -119,18 +123,20 @@ async def update_workflow(workflow_id: str, data: WorkflowUpdate, db: AsyncSessi
                 tool_id=node_data.tool_id,
             )
             db.add(node)
+            await db.flush()
+            node_map[node_data.id] = node.id
 
         for edge_data in data.dag.edges:
             edge = WorkflowEdge(
                 workflow_id=workflow.id,
-                source_node_id=edge_data.source_node_id,
-                target_node_id=edge_data.target_node_id,
+                source_node_id=node_map.get(edge_data.source_node_id, edge_data.source_node_id),
+                target_node_id=node_map.get(edge_data.target_node_id, edge_data.target_node_id),
                 condition_expr=edge_data.condition_expr,
                 label=edge_data.label,
             )
             db.add(edge)
 
-        workflow.start_node_id = data.dag.start_node_id
+        workflow.start_node_id = node_map.get(data.dag.start_node_id, data.dag.start_node_id)
 
     await db.flush()
     await db.refresh(workflow)
