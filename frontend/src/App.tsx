@@ -1,15 +1,11 @@
-import { useAuthStore } from './stores/authStore';
-import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
+import { RouterProvider } from 'react-router-dom'
+import { router } from './router'
+import { ToastProvider } from './components/ui'
 
-function App() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-
-  if (!isAuthenticated()) {
-    return <LoginPage />;
-  }
-
-  return <DashboardPage />;
+export default function App() {
+  return (
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>
+  )
 }
-
-export default App;

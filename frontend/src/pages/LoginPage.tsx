@@ -1,85 +1,107 @@
-import { useState } from 'react';
-import { useAuthStore } from '../stores/authStore';
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuthStore } from '../stores/authStore'
+import { Button, Input } from '../components/ui'
 
 export default function LoginPage() {
-  const [isRegister, setIsRegister] = useState(false);
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const login = useAuthStore((s) => s.login);
-  const register = useAuthStore((s) => s.register);
+  const navigate = useNavigate()
+  const [isRegister, setIsRegister] = useState(false)
+  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const login = useAuthStore((s) => s.login)
+  const register = useAuthStore((s) => s.register)
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+    e.preventDefault()
+    setError('')
+    setLoading(true)
     try {
       if (isRegister) {
-        await register(username, email, password);
+        await register(username, email, password)
       } else {
-        await login(username, password);
+        await login(username, password)
       }
+      navigate('/dashboard')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '发生错误');
+      setError(err.response?.data?.detail || '发生错误')
+    } finally {
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md w-96">
-        <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-white">
-          {isRegister ? '注册' : '登录'} OrchAgent
-        </h1>
-        {error && (
-          <div className="bg-red-100 text-red-700 p-3 rounded mb-4 text-sm">{error}</div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">用户名</label>
-            <input
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-blue-50 dark:from-gray-900 dark:to-gray-800">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-xl font-bold text-white">
+            O
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">OrchAgent</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">智能体协作编排平台</p>
+        </div>
+
+        <div className="rounded-xl bg-white dark:bg-gray-800 p-8 shadow-lg">
+          <div className="mb-6 flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+            <button
+              onClick={() => setIsRegister(false)}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
+                !isRegister ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              登录
+            </button>
+            <button
+              onClick={() => setIsRegister(true)}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all ${
+                isRegister ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              注册
+            </button>
+          </div>
+
+          {error && (
+            <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Input
+              label="用户名"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 block w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+              placeholder="请输入用户名"
               required
             />
-          </div>
-          {isRegister && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">邮箱</label>
-              <input
+            {isRegister && (
+              <Input
+                label="邮箱"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+                placeholder="请输入邮箱"
                 required
               />
-            </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">密码</label>
-            <input
+            )}
+            <Input
+              label="密码"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
+              placeholder="请输入密码"
               required
             />
-          </div>
-          <button
-            type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition"
-          >
-            {isRegister ? '注册' : '登录'}
-          </button>
-        </form>
-        <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-          {isRegister ? '已有账号？' : '没有账号？'}{' '}
-          <button onClick={() => setIsRegister(!isRegister)} className="text-blue-600 hover:underline">
-            {isRegister ? '登录' : '注册'}
-          </button>
-        </p>
+            <Button type="submit" className="w-full" size="lg" loading={loading}>
+              {isRegister ? '注册' : '登录'}
+            </Button>
+          </form>
+        </div>
       </div>
     </div>
-  );
+  )
 }

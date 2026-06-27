@@ -29,3 +29,18 @@ body {
 .react-flow__node-human {
   @apply bg-orange-500 text-white rounded-lg px-4 py-2 shadow-md;
 }
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}

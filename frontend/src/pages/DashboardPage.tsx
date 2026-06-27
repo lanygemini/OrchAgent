@@ -1,65 +1,109 @@
-import { useEffect, useState } from 'react';
-import { statsApi, agentApi, workflowApi } from '../api/client';
-import { useAuthStore } from '../stores/authStore';
+import { useEffect, useState } from 'react'
+import { statsApi } from '../api/client'
+import { Card, Skeleton, EmptyState, Button } from '../components/ui'
+import { useNavigate } from 'react-router-dom'
+import type { DashboardStats } from '../types'
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<any>(null);
-  const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const navigate = useNavigate()
 
-  useEffect(() => {
-    statsApi.dashboard().then((res) => setStats(res.data));
-  }, []);
+  const fetchStats = () => {
+    setLoading(true)
+    setError(false)
+    statsApi.dashboard()
+      .then((res) => setStats(res.data))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchStats() }, [])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i}>
+              <Skeleton className="h-4 w-20 mb-3" />
+              <Skeleton className="h-8 w-16" />
+            </Card>
+          ))}
+        </div>
+        <Card>
+          <Skeleton className="h-64 w-full" />
+        </Card>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        title="加载失败"
+        description="无法获取仪表盘数据，请检查网络连接"
+        action={<Button onClick={fetchStats}>重试</Button>}
+      />
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <header className="bg-white dark:bg-gray-800 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-800 dark:text-white">OrchAgent</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-600 dark:text-gray-300">{user?.username}</span>
-            <button onClick={logout} className="text-sm text-red-600 hover:underline">退出登录</button>
-          </div>
-        </div>
-      </header>
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">仪表盘</h2>
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatCard title="Agent" value={stats?.total_agents ?? '-'} color="blue" />
-          <StatCard title="工作流" value={stats?.total_workflows ?? '-'} color="green" />
-          <StatCard title="工具" value={stats?.total_tools ?? '-'} color="purple" />
-          <StatCard title="执行次数" value={stats?.total_executions ?? '-'} color="orange" />
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard title="Agent" value={stats?.total_agents ?? 0} />
+        <StatCard title="工作流" value={stats?.total_workflows ?? 0} />
+        <StatCard title="工具" value={stats?.total_tools ?? 0} />
+        <StatCard title="执行次数" value={stats?.total_executions ?? 0} />
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">今日</h2>
-            <p className="text-3xl font-bold text-blue-600">{stats?.executions_today ?? 0}</p>
-            <p className="text-sm text-gray-500">今日执行次数</p>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">正在运行</h2>
-            <p className="text-3xl font-bold text-green-600">{stats?.active_executions ?? 0}</p>
-            <p className="text-sm text-gray-500">当前活跃数</p>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">今日执行</h3>
+          <p className="text-3xl font-bold text-blue-600">{stats?.executions_today ?? 0}</p>
+          <p className="text-xs text-gray-400 mt-1">今日执行次数</p>
+        </Card>
+        <Card>
+          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">正在运行</h3>
+          <p className="text-3xl font-bold text-green-600">{stats?.active_executions ?? 0}</p>
+          <p className="text-xs text-gray-400 mt-1">当前活跃执行数</p>
+        </Card>
+      </div>
+
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">最近执行</h3>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/executions')}>查看全部</Button>
         </div>
-      </main>
+        {stats?.recent_executions && stats.recent_executions.length > 0 ? (
+          <div className="space-y-2">
+            {stats.recent_executions.slice(0, 5).map((exec) => (
+              <div
+                key={exec.id}
+                className="flex items-center justify-between rounded-lg border border-gray-100 dark:border-gray-700 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                onClick={() => navigate(`/executions/${exec.id}`)}
+              >
+                <span className="text-sm text-gray-700 dark:text-gray-300">{exec.workflow_name}</span>
+                <span className="text-xs text-gray-400">{new Date(exec.created_at || '').toLocaleString('zh-CN')}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400 py-8 text-center">暂无执行记录</p>
+        )}
+      </Card>
     </div>
-  );
+  )
 }
 
-function StatCard({ title, value, color }: { title: string; value: any; color: string }) {
-  const colorMap: Record<string, string> = {
-    blue: 'text-blue-600 border-blue-200',
-    green: 'text-green-600 border-green-200',
-    purple: 'text-purple-600 border-purple-200',
-    orange: 'text-orange-600 border-orange-200',
-  };
-
+function StatCard({ title, value }: { title: string; value: number }) {
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow p-6 border-l-4 ${colorMap[color] || ''}`}>
-      <h3 className="text-sm text-gray-500 dark:text-gray-400 mb-2">{title}</h3>
-      <p className="text-3xl font-bold text-gray-800 dark:text-white">{value}</p>
-    </div>
-  );
+    <Card>
+      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">{title}</h3>
+      <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
+    </Card>
+  )
 }
