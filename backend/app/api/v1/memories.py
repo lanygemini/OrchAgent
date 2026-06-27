@@ -12,9 +12,17 @@ router = APIRouter(prefix="/api/v1/memories", tags=["Memories"])
 
 
 @router.post("/{agent_id}/extract")
-async def extract_memories(agent_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """从对话中提取记忆（实现待完成）"""
-    return {"message": "记忆提取端点（实现待完成）", "agent_id": agent_id}
+async def extract_memories(agent_id: str, session_id: str = "default", messages: list = [], db: AsyncSession = Depends(get_db)):
+    """从对话中提取记忆"""
+    from app.core.memory.extractor import MemoryExtractor
+
+    extractor = MemoryExtractor(db)
+    count = await extractor.extract_from_conversation(
+        agent_id=agent_id,
+        session_id=session_id,
+        messages=messages,
+    )
+    return {"message": f"已提取 {count} 条记忆", "agent_id": agent_id, "extracted_count": count}
 
 
 @router.get("/{agent_id}")

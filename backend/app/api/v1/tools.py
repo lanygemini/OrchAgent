@@ -75,9 +75,27 @@ async def delete_tool(tool_id: str, db: AsyncSession = Depends(get_db), user=Dep
 
 @router.post("/{tool_id}/test", response_model=ToolTestResponse)
 async def test_tool(tool_id: str, data: ToolTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """测试工具执行（执行功能待实现）"""
+    """测试工具执行"""
+    import time
+
     result = await db.execute(select(Tool).where(Tool.id == tool_id, Tool.owner_id == user.sub))
     tool = result.scalar_one_or_none()
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")
-    return ToolTestResponse(success=True, result="工具测试端点（执行待实现）", execution_time_ms=0.0)
+
+    try:
+        from app.core.tool.registry import tool_registry
+
+        registered_tool = tool_registry.get(tool_id)
+        if not registered_tool:
+            registered_tool = tool_registry.get_by_name(tool.name)
+
+        if registered_tool:
+            start = time.time()
+            result_val = await registered_tool._arun(**data.input_data)
+            elapsed = (time.time() - start) * 1000
+            return ToolTestResponse(success=True, result=result_val, execution_time_ms=round(elapsed, 2))
+        else:
+            return ToolTestResponse(success=False, error=f"工具 '{tool.name}' 未注册到运行时", execution_time_ms=0)
+    except Exception as e:
+        return ToolTestResponse(success=False, error=str(e), execution_time_ms=0)

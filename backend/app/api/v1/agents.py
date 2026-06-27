@@ -101,9 +101,27 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db), user=D
 
 @router.post("/{agent_id}/test")
 async def test_agent(agent_id: str, data: AgentTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """测试 Agent（LLM 调用待实现）"""
+    """测试 Agent（调用 LLM 并返回结果）"""
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.owner_id == user.sub))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent 不存在")
-    return {"message": "Agent 测试端点（LLM 集成待实现）", "agent_id": agent_id, "input": data.input_text, "stream": data.stream}
+
+    from app.core.agent.agent_manager import agent_manager
+
+    runtime = agent_manager.create_runtime(agent)
+    if data.stream:
+        chunks = []
+        async for chunk in runtime.stream(data.input_text):
+            if chunk.content:
+                chunks.append(chunk.content)
+        return {"agent_id": agent_id, "input": data.input_text, "output": "".join(chunks), "stream": True}
+    else:
+        response = runtime.invoke(data.input_text)
+        return {
+            "agent_id": agent_id,
+            "input": data.input_text,
+            "output": response.content,
+            "token_usage": response.token_usage,
+            "stream": False,
+        }

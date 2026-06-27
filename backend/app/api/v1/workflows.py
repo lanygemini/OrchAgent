@@ -160,4 +160,32 @@ async def validate_workflow(workflow_id: str, db: AsyncSession = Depends(get_db)
     workflow = result.scalar_one_or_none()
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
-    return WorkflowValidateResponse(valid=True, errors=[], warnings=[])
+
+    from app.core.workflow.compiler import WorkflowCompiler, DAGDefinition, DAGNode, DAGEdge
+
+    nodes = [
+        DAGNode(
+            id=node.id, type=node.type, label=node.label,
+            config=node.config or {}, position_x=node.position_x,
+            position_y=node.position_y, agent_id=node.agent_id, tool_id=node.tool_id,
+        )
+        for node in workflow.nodes
+    ]
+    edges = [
+        DAGEdge(
+            id=edge.id, source_node_id=edge.source_node_id,
+            target_node_id=edge.target_node_id, condition_expr=edge.condition_expr,
+            label=edge.label,
+        )
+        for edge in workflow.edges
+    ]
+    dag = DAGDefinition(nodes=nodes, edges=edges, start_node_id=workflow.start_node_id or "")
+
+    compiler = WorkflowCompiler()
+    errors = compiler.validate(dag)
+    warnings = []
+    has_agent = any(n.type == "agent" for n in workflow.nodes)
+    if not has_agent:
+        warnings.append("工作流中没有任何 Agent 节点，将无法调用 LLM")
+
+    return WorkflowValidateResponse(valid=len(errors) == 0, errors=errors, warnings=warnings)
