@@ -10,7 +10,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # 白名单路径：无需认证
-        if request.url.path in ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/register", "/api/v1/auth/login"):
+        if request.url.path in ("/health", "/docs", "/redoc", "/openapi.json", "/metrics", "/api/v1/auth/register", "/api/v1/auth/login"):
             return await call_next(request)
 
         if request.url.path.startswith("/api/v1/auth/refresh"):

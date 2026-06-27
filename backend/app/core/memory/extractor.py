@@ -1,10 +1,13 @@
 """记忆提取器：从对话中识别和提取值得长期记忆的信息"""
 import json
+import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.episodic import EpisodicMemoryStore
 from app.core.prompts.memory_prompts import MEMORY_EXTRACTION_PROMPT
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryExtractor:
@@ -48,8 +51,8 @@ class MemoryExtractor:
                         importance=item.get("importance", importance),
                     )
                     extracted_count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"LLM 记忆提取失败: {e}")
 
         # LLM 提取失败或无结果时，保存原始消息片段作为回退
         if extracted_count == 0:
@@ -72,6 +75,6 @@ class MemoryExtractor:
             json_end = text.rfind("]")
             if json_start >= 0 and json_end > json_start:
                 return json.loads(text[json_start:json_end + 1])
-        except (json.JSONDecodeError, KeyError):
-            pass
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"记忆提取结果 JSON 解析失败: {e}")
         return []

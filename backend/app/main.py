@@ -9,6 +9,7 @@ from app.config import settings
 from app.api.router import api_router
 from app.core.security.auth_middleware import AuthMiddleware
 from app.core.security.rbac_middleware import RBACMiddleware
+from app.core.observability.metrics import metrics_endpoint
 from app.db.session import engine
 from app.db.base import Base
 
@@ -51,3 +52,9 @@ app.include_router(api_router)
 async def health():
     """健康检查接口"""
     return {"status": "ok", "version": "0.1.0", "environment": settings.environment, "message": "服务运行正常"}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus 指标端点"""
+    return await metrics_endpoint()
