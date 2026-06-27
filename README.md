@@ -41,7 +41,7 @@ docker compose down
 先使用 Docker 启动数据库和缓存：
 
 ```bash
-docker compose up -d postgres redis
+docker compose -f docker-compose.infra.yml up -d
 ```
 
 ### 2. 后端启动
@@ -59,7 +59,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # 安装依赖
-pip install -r requirements.txt
+pip install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r requirements.txt
 
 # 启动开发服务器（热重载）
 uvicorn app.main:app --reload --port 8000
