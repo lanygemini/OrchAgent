@@ -3,6 +3,15 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+RESOURCE_PATTERNS = [
+    ("/api/v1/agents/", "agent"),
+    ("/api/v1/tools/", "tool"),
+    ("/api/v1/workflows/", "workflow"),
+    ("/api/v1/executions/", "execution"),
+    ("/api/v1/mcp/servers/", "mcp_server"),
+    ("/api/v1/memories/", "memory"),
+]
+
 
 class ResourceOwnerMiddleware(BaseHTTPMiddleware):
     """从 URL 路径中提取资源 ID 和类型注入 request.state"""
@@ -11,12 +20,14 @@ class ResourceOwnerMiddleware(BaseHTTPMiddleware):
         if not hasattr(request.state, "user"):
             return await call_next(request)
 
-        user = request.state.user
         path = request.url.path
 
-        if path.startswith("/api/v1/agents/") and request.method in ("PUT", "DELETE"):
-            resource_id = path.split("/")[-1]
-            request.state.resource_id = resource_id
-            request.state.resource_type = "agent"
+        for prefix, resource_type in RESOURCE_PATTERNS:
+            if path.startswith(prefix) and request.method in ("PUT", "PATCH", "DELETE"):
+                resource_id = path[len(prefix):].split("/")[0]
+                if resource_id:
+                    request.state.resource_id = resource_id
+                    request.state.resource_type = resource_type
+                    break
 
         return await call_next(request)
