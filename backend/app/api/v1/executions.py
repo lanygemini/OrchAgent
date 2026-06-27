@@ -1,16 +1,35 @@
 """执行管理 API：触发执行、查询状态、SSE 流式输出、暂停/恢复/取消"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional
-import json
 
 from app.dependencies import get_db, get_current_user
 from app.models.execution import WorkflowExecution, ExecutionStep
 from app.models.workflow import Workflow
 from app.schemas.execution import ExecuteRequest, ExecutionResponse, ExecutionStepResponse
+from app.core.execution.engine import ExecutionEngine
+from app.core.execution.streamer import ExecutionStreamer
 
 router = APIRouter(prefix="/api/v1/executions", tags=["执行管理"])
+
+_engine: Optional[ExecutionEngine] = None
+_streamer: Optional[ExecutionStreamer] = None
+
+
+def _get_engine() -> ExecutionEngine:
+    global _engine
+    if _engine is None:
+        _engine = ExecutionEngine(db=None)
+    return _engine
+
+
+def _get_streamer() -> ExecutionStreamer:
+    global _streamer
+    if _streamer is None:
+        _streamer = ExecutionStreamer()
+    return _streamer
 
 
 @router.post("/{workflow_id}/execute", response_model=ExecutionResponse, status_code=202)
@@ -26,16 +45,15 @@ async def execute_workflow(
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
-    execution = WorkflowExecution(
-        workflow_id=workflow.id,
-        workflow_name=workflow.name,
-        status="pending",
-        input_data={"input_text": data.input_text, "variables": data.variables},
-        created_by=user.sub,
+    engine = _get_engine()
+    engine.db = db
+    execution = await engine.execute(
+        workflow=workflow,
+        input_text=data.input_text,
+        variables=data.variables,
+        user_id=user.sub,
+        stream=data.stream,
     )
-    db.add(execution)
-    await db.flush()
-    await db.refresh(execution)
 
     return ExecutionResponse(
         id=execution.id,
@@ -77,12 +95,22 @@ async def get_execution(execution_id: str, db: AsyncSession = Depends(get_db), u
 
 @router.get("/{execution_id}/stream")
 async def stream_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """SSE 流式输出执行过程（实现待完成）"""
+    """SSE 流式输出执行过程"""
     result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
     execution = result.scalar_one_or_none()
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    return {"message": "SSE 流式输出端点（实现待完成）", "execution_id": execution_id}
+
+    streamer = _get_streamer()
+    return StreamingResponse(
+        streamer.subscribe(execution_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{execution_id}/steps")
@@ -97,17 +125,41 @@ async def list_execution_steps(execution_id: str, db: AsyncSession = Depends(get
 
 @router.post("/{execution_id}/pause", status_code=200)
 async def pause_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """暂停执行（实现待完成）"""
-    return {"message": "暂停端点（实现待完成）", "execution_id": execution_id}
+    """暂停执行"""
+    result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
+    execution = result.scalar_one_or_none()
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+
+    engine = _get_engine()
+    engine.db = db
+    await engine.pause(execution_id)
+    return {"message": "执行已暂停", "execution_id": execution_id, "status": "paused"}
 
 
 @router.post("/{execution_id}/resume", status_code=200)
 async def resume_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """恢复执行（实现待完成）"""
-    return {"message": "恢复端点（实现待完成）", "execution_id": execution_id}
+    """恢复执行"""
+    result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
+    execution = result.scalar_one_or_none()
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+
+    engine = _get_engine()
+    engine.db = db
+    await engine.resume(execution_id)
+    return {"message": "执行已恢复", "execution_id": execution_id, "status": "running"}
 
 
 @router.post("/{execution_id}/cancel", status_code=200)
 async def cancel_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """取消执行（实现待完成）"""
-    return {"message": "取消端点（实现待完成）", "execution_id": execution_id}
+    """取消执行"""
+    result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
+    execution = result.scalar_one_or_none()
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+
+    engine = _get_engine()
+    engine.db = db
+    await engine.cancel(execution_id)
+    return {"message": "执行已取消", "execution_id": execution_id, "status": "cancelled"}

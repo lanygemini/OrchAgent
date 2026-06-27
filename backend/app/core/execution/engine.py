@@ -1,10 +1,10 @@
 """执行引擎：异步驱动工作流执行，协调编译器 / 流式输出 / 预算控制 / 错误处理"""
 import asyncio
-import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph
 
@@ -33,7 +33,7 @@ class ExecutionEngine:
 
     def __init__(
         self,
-        db: AsyncSession,
+        db: Optional[AsyncSession] = None,
         compiler: Optional[WorkflowCompiler] = None,
         streamer: Optional[ExecutionStreamer] = None,
         budget_controller: Optional[BudgetController] = None,
@@ -140,8 +140,7 @@ class ExecutionEngine:
             self._active_tasks.pop(ctx.execution_id, None)
 
     async def _build_dag_from_workflow(self, workflow_id: str) -> DAGDefinition:
-        from sqlalchemy import select
-        from app.models.workflow import Workflow as WF, WorkflowNode, WorkflowEdge
+        from app.models.workflow import Workflow as WF
 
         result = await self.db.execute(select(WF).where(WF.id == workflow_id))
         wf = result.scalar_one_or_none()
@@ -190,25 +189,23 @@ class ExecutionEngine:
         if task:
             task.cancel()
             self._active_tasks.pop(execution_id, None)
-        async with self.db.begin():
-            result = await self.db.execute(
-                __import__("sqlalchemy").select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
-            )
-            execution = result.scalar_one_or_none()
-            if execution:
-                execution.status = "paused"
-                await self.db.flush()
+        result = await self.db.execute(
+            select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
+        )
+        execution = result.scalar_one_or_none()
+        if execution:
+            execution.status = "paused"
+            await self.db.flush()
 
     async def resume(self, execution_id: str, human_input: Optional[str] = None):
-        """恢复执行（待实现）"""
-        async with self.db.begin():
-            result = await self.db.execute(
-                __import__("sqlalchemy").select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
-            )
-            execution = result.scalar_one_or_none()
-            if execution:
-                execution.status = "running"
-                await self.db.flush()
+        """恢复执行"""
+        result = await self.db.execute(
+            select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
+        )
+        execution = result.scalar_one_or_none()
+        if execution:
+            execution.status = "running"
+            await self.db.flush()
 
     async def cancel(self, execution_id: str):
         """取消执行"""
@@ -216,12 +213,11 @@ class ExecutionEngine:
         if task:
             task.cancel()
             self._active_tasks.pop(execution_id, None)
-        async with self.db.begin():
-            result = await self.db.execute(
-                __import__("sqlalchemy").select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
-            )
-            execution = result.scalar_one_or_none()
-            if execution:
-                execution.status = "cancelled"
-                execution.completed_at = datetime.now(timezone.utc)
-                await self.db.flush()
+        result = await self.db.execute(
+            select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
+        )
+        execution = result.scalar_one_or_none()
+        if execution:
+            execution.status = "cancelled"
+            execution.completed_at = datetime.now(timezone.utc)
+            await self.db.flush()
