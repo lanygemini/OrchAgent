@@ -72,6 +72,13 @@ export interface Workflow {
 
 export type ExecutionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 
+export interface TokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_estimate: number
+}
+
 export interface Execution {
   id: string
   workflow_id: string
@@ -79,25 +86,27 @@ export interface Execution {
   status: ExecutionStatus
   input_data?: any
   output_data?: any
-  token_usage?: number
+  token_usage?: TokenUsage
   step_count: number
   started_at?: string
-  finished_at?: string
+  completed_at?: string
   created_at?: string
+  error_message?: string
 }
 
 export interface ExecutionStep {
   id: string
   execution_id: string
   node_id: string
-  node_name: string
+  node_label: string
+  step_type: string
   status: ExecutionStatus
-  input?: any
-  output?: any
-  token_usage?: number
-  duration_ms?: number
+  input_data?: any
+  output_data?: any
+  token_usage?: TokenUsage
   started_at?: string
-  finished_at?: string
+  completed_at?: string
+  error_message?: string
 }
 
 export interface MCPServer {

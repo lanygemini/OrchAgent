@@ -32,6 +32,50 @@ def _get_streamer() -> ExecutionStreamer:
     return _streamer
 
 
+@router.get("")
+async def list_executions(
+    workflow_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """获取执行记录列表"""
+    conditions = [WorkflowExecution.created_by == user.sub]
+    if workflow_id:
+        conditions.append(WorkflowExecution.workflow_id == workflow_id)
+    if status:
+        conditions.append(WorkflowExecution.status == status)
+
+    result = await db.execute(
+        select(WorkflowExecution).where(*conditions).order_by(WorkflowExecution.created_at.desc()).offset(offset).limit(limit)
+    )
+    executions = result.scalars().all()
+
+    items = []
+    for ex in executions:
+        steps_result = await db.execute(
+            select(ExecutionStep).where(ExecutionStep.execution_id == ex.id)
+        )
+        steps = steps_result.scalars().all()
+        items.append(ExecutionResponse(
+            id=ex.id,
+            workflow_id=ex.workflow_id,
+            workflow_name=ex.workflow_name,
+            status=ex.status,
+            input_data=ex.input_data or {},
+            output_data=ex.output_data,
+            token_usage=ex.token_usage or {},
+            started_at=ex.started_at,
+            completed_at=ex.completed_at,
+            error_message=ex.error_message,
+            step_count=len(steps),
+        ))
+
+    return {"items": items, "total": len(items)}
+
+
 @router.post("/{workflow_id}/execute", response_model=ExecutionResponse, status_code=202)
 async def execute_workflow(
     workflow_id: str,
@@ -88,6 +132,7 @@ async def get_execution(execution_id: str, db: AsyncSession = Depends(get_db), u
         token_usage=execution.token_usage or {},
         started_at=execution.started_at,
         completed_at=execution.completed_at,
+        created_at=execution.created_at,
         error_message=execution.error_message,
         step_count=len(steps),
     )

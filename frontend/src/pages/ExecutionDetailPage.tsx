@@ -70,7 +70,7 @@ export default function ExecutionDetailPage() {
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">Token 消耗</p>
             <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {execution.token_usage?.toLocaleString() || '-'}
+              {execution.token_usage?.total_tokens?.toLocaleString() || '-'}
             </p>
           </div>
           <div>
@@ -104,13 +104,14 @@ export default function ExecutionDetailPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{step.node_name}</span>
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{step.node_label}</span>
                   <Badge>{step.status}</Badge>
                 </div>
-                {step.duration_ms != null && (
+                {(step.started_at || step.completed_at) && (
                   <p className="mt-0.5 text-xs text-gray-500">
-                    {(step.duration_ms / 1000).toFixed(1)}s
-                    {step.token_usage != null && ` · ${step.token_usage} tokens`}
+                    {step.started_at && new Date(step.started_at).toLocaleTimeString('zh-CN')}
+                    {step.completed_at && ` → ${new Date(step.completed_at).toLocaleTimeString('zh-CN')}`}
+                    {step.token_usage?.total_tokens != null && ` · ${step.token_usage.total_tokens} tokens`}
                   </p>
                 )}
               </div>

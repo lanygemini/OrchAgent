@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Card, Table, Badge, Button } from '../components/ui'
 import type { Column } from '../components/ui'
 import type { Execution } from '../types'
+import { executionApi } from '../api/client'
 
 export default function ExecutionListPage() {
   const navigate = useNavigate()
@@ -11,10 +12,14 @@ export default function ExecutionListPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
 
   useEffect(() => {
-    // TODO: proper execution list endpoint
-    setLoading(false)
-    setExecutions([])
-  }, [])
+    setLoading(true)
+    const params: any = {}
+    if (statusFilter) params.status = statusFilter
+    executionApi.list(params)
+      .then((res) => setExecutions(res.data.items || []))
+      .catch(() => setExecutions([]))
+      .finally(() => setLoading(false))
+  }, [statusFilter])
 
   const statusLabels: Record<string, string> = {
     running: '运行中',
@@ -40,7 +45,7 @@ export default function ExecutionListPage() {
     {
       key: 'token_usage',
       header: 'Token',
-      render: (row) => row.token_usage ? `${row.token_usage.toLocaleString()}` : '-',
+      render: (row) => row.token_usage?.total_tokens ? `${row.token_usage.total_tokens.toLocaleString()}` : '-',
     },
     {
       key: 'created_at',

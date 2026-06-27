@@ -32,44 +32,64 @@ export function subscribeExecution(
   callbacks: SSEEventCallback,
   token?: string,
 ): () => void {
+  let aborted = false;
+  const abortController = new AbortController();
+
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const eventSource = new EventSource(
-    `/api/v1/executions/${executionId}/stream`,
-    headers as any,
-  );
+  const url = `/api/v1/executions/${executionId}/stream`;
 
-  eventSource.onmessage = (event) => {
+  (async () => {
     try {
-      const data = JSON.parse(event.data);
-      console.log('[SSE]', data);
-    } catch {
-      console.log('[SSE] raw:', event.data);
-    }
-  };
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: abortController.signal,
+      });
 
-  for (const [eventType, callbackKey] of Object.entries(EVENT_MAP)) {
-    eventSource.addEventListener(eventType, (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        const cb = callbacks[callbackKey];
-        if (cb) cb(data);
-      } catch (e) {
-        if (callbacks.onError) callbacks.onError(e);
+      if (!response.ok || !response.body) {
+        if (callbacks.onError) callbacks.onError(new Error(`SSE connection failed: ${response.status}`));
+        return;
       }
-    });
-  }
 
-  eventSource.onerror = () => {
-    const cb = callbacks.onError;
-    if (cb) cb(new Error('SSE connection error'));
-    eventSource.close();
-  };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (!aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const raw = JSON.parse(line.slice(6));
+              console.log('[SSE]', raw);
+            } catch {
+              console.log('[SSE] raw:', line.slice(6));
+            }
+          } else if (line.startsWith('event: ')) {
+            const eventType = line.slice(7).trim();
+            buffer = eventType + '\n' + (buffer || '');
+          }
+        }
+      }
+    } catch (e: any) {
+      if (!aborted && callbacks.onError) {
+        callbacks.onError(e);
+      }
+    }
+  })();
 
   return () => {
-    eventSource.close();
+    aborted = true;
+    abortController.abort();
   };
 }

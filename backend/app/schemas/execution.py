@@ -30,6 +30,7 @@ class ExecutionResponse(BaseModel):
     token_usage: TokenUsage = TokenUsage()
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
     error_message: Optional[str] = None
     step_count: int = 0
 

@@ -65,6 +65,7 @@ export const workflowApi = {
 };
 
 export const executionApi = {
+  list: (params?: any) => apiClient.get('/executions', { params }),
   get: (id: string) => apiClient.get(`/executions/${id}`),
   steps: (id: string) => apiClient.get(`/executions/${id}/steps`),
   pause: (id: string) => apiClient.post(`/executions/${id}/pause`),
