@@ -1,9 +1,11 @@
+"""MCP（Model Context Protocol）相关 Schema"""
 from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 
 class MCPServerCreate(BaseModel):
+    """注册 MCP 服务器的请求体"""
     name: str = Field(..., min_length=1, max_length=64)
     description: str = ""
     transport: str = Field(..., pattern="^(stdio|sse|streamable-http)$")
@@ -17,6 +19,7 @@ class MCPServerCreate(BaseModel):
 
 
 class MCPServerResponse(BaseModel):
+    """MCP 服务器响应体"""
     id: str
     name: str
     description: str
@@ -35,12 +38,14 @@ class MCPServerResponse(BaseModel):
 
 
 class MCPToolDef(BaseModel):
+    """MCP 工具定义"""
     name: str
     description: str
     input_schema: Dict
 
 
 class MCPToolsResponse(BaseModel):
+    """MCP 工具列表响应"""
     server_id: str
     server_name: str
     tools: List[MCPToolDef]

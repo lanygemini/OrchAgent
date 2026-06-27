@@ -1,3 +1,4 @@
+"""执行管理 API：触发执行、查询状态、SSE 流式输出、暂停/恢复/取消"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -19,6 +20,7 @@ async def execute_workflow(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """触发工作流执行（异步，返回 202）"""
     wf_result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == user.sub))
     workflow = wf_result.scalar_one_or_none()
     if not workflow:
@@ -47,6 +49,7 @@ async def execute_workflow(
 
 @router.get("/{execution_id}", response_model=ExecutionResponse)
 async def get_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取执行记录详情（含步骤数）"""
     result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
     execution = result.scalar_one_or_none()
     if not execution:
@@ -74,6 +77,7 @@ async def get_execution(execution_id: str, db: AsyncSession = Depends(get_db), u
 
 @router.get("/{execution_id}/stream")
 async def stream_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """SSE 流式输出执行过程（实现待完成）"""
     result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
     execution = result.scalar_one_or_none()
     if not execution:
@@ -83,6 +87,7 @@ async def stream_execution(execution_id: str, db: AsyncSession = Depends(get_db)
 
 @router.get("/{execution_id}/steps")
 async def list_execution_steps(execution_id: str, db: AsyncSession = Depends(get_db)):
+    """获取执行步骤列表"""
     result = await db.execute(
         select(ExecutionStep).where(ExecutionStep.execution_id == execution_id).order_by(ExecutionStep.started_at)
     )
@@ -92,14 +97,17 @@ async def list_execution_steps(execution_id: str, db: AsyncSession = Depends(get
 
 @router.post("/{execution_id}/pause", status_code=200)
 async def pause_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """暂停执行（实现待完成）"""
     return {"message": "暂停端点（实现待完成）", "execution_id": execution_id}
 
 
 @router.post("/{execution_id}/resume", status_code=200)
 async def resume_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """恢复执行（实现待完成）"""
     return {"message": "恢复端点（实现待完成）", "execution_id": execution_id}
 
 
 @router.post("/{execution_id}/cancel", status_code=200)
 async def cancel_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """取消执行（实现待完成）"""
     return {"message": "取消端点（实现待完成）", "execution_id": execution_id}

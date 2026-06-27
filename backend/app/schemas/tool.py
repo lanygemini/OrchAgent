@@ -1,9 +1,11 @@
+"""工具相关 Schema：注册、更新、测试"""
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 
 class ToolCreate(BaseModel):
+    """注册工具的请求体"""
     name: str = Field(..., min_length=1, max_length=64)
     description: str = ""
     type: str = "builtin"
@@ -14,6 +16,7 @@ class ToolCreate(BaseModel):
 
 
 class ToolUpdate(BaseModel):
+    """更新工具的请求体"""
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
@@ -21,6 +24,7 @@ class ToolUpdate(BaseModel):
 
 
 class ToolResponse(BaseModel):
+    """工具响应体"""
     id: str
     name: str
     description: str
@@ -36,10 +40,12 @@ class ToolResponse(BaseModel):
 
 
 class ToolTestRequest(BaseModel):
+    """测试工具的请求体"""
     input_data: Dict[str, Any] = {}
 
 
 class ToolTestResponse(BaseModel):
+    """测试工具的响应体"""
     success: bool
     result: Any = None
     error: Optional[str] = None

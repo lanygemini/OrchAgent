@@ -1,8 +1,10 @@
+"""输出过滤器：从工具执行结果中脱敏敏感信息"""
 import re
 from typing import Any, Dict
 
 
 class OutputFilter:
+    """脱敏敏感信息（API 密钥、JWT、信用卡号等）"""
     SENSITIVE_PATTERNS = [
         (r"sk-[a-zA-Z0-9]{20,}", "[API_KEY_REDACTED]"),
         (r"AKIA[0-9A-Z]{16}", "[AWS_KEY_REDACTED]"),
@@ -12,12 +14,14 @@ class OutputFilter:
     ]
 
     def filter_text(self, text: str) -> str:
+        """过滤文本中的敏感信息"""
         result = text
         for pattern, replacement in self.SENSITIVE_PATTERNS:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
         return result
 
     def filter_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """递归过滤字典中的敏感信息"""
         result = {}
         for key, value in data.items():
             if isinstance(value, str):

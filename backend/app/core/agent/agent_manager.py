@@ -1,3 +1,4 @@
+"""Agent 管理器：创建 / 缓存 / 获取 AgentRuntime，驱动 Agent 的 invoke / stream"""
 from typing import Optional, AsyncIterator, Dict, Any, List
 from dataclasses import dataclass, field
 
@@ -12,6 +13,7 @@ from app.models.agent import Agent as AgentModel
 
 @dataclass
 class AgentConfig:
+    """Agent 运行时配置"""
     name: str
     role: str
     llm_provider: str
@@ -26,6 +28,7 @@ class AgentConfig:
 
 @dataclass
 class AgentResponse:
+    """Agent 调用响应"""
     content: str
     agent_id: str
     token_usage: Dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
@@ -33,12 +36,15 @@ class AgentResponse:
 
 @dataclass
 class Chunk:
+    """流式响应块"""
     content: str
     done: bool = False
     token_usage: Optional[Dict[str, int]] = None
 
 
 class AgentRuntime:
+    """Agent 运行时：持有 LLM 实例和工具列表，提供 invoke / stream 能力"""
+
     def __init__(self, agent_id: str, config: AgentConfig, llm: BaseChatModel, tools: Optional[List[BaseTool]] = None):
         self.agent_id = agent_id
         self.config = config
@@ -47,6 +53,7 @@ class AgentRuntime:
         self.usage_callback = LLMUsageCallback()
 
     def invoke(self, input_text: str, chat_history: Optional[List[BaseMessage]] = None) -> AgentResponse:
+        """同步调用 Agent（组装 System + 历史 + 用户消息，调用 LLM）"""
         messages = [SystemMessage(content=self.config.system_prompt), HumanMessage(content=input_text)]
         if chat_history:
             messages = [SystemMessage(content=self.config.system_prompt)] + chat_history + [HumanMessage(content=input_text)]
@@ -74,6 +81,7 @@ class AgentRuntime:
         )
 
     async def stream(self, input_text: str, chat_history: Optional[List[BaseMessage]] = None) -> AsyncIterator[Chunk]:
+        """流式调用 Agent（SSE 逐块输出）"""
         messages = [SystemMessage(content=self.config.system_prompt), HumanMessage(content=input_text)]
         if chat_history:
             messages = [SystemMessage(content=self.config.system_prompt)] + chat_history + [HumanMessage(content=input_text)]
@@ -100,10 +108,13 @@ class AgentRuntime:
 
 
 class AgentManager:
+    """Agent 管理器：从模型创建 Runtime 并缓存"""
+
     def __init__(self):
         self._cache: Dict[str, AgentRuntime] = {}
 
     def create_runtime(self, agent_model: AgentModel, tools: Optional[List[BaseTool]] = None) -> AgentRuntime:
+        """从数据库 Agent 模型创建运行时实例"""
         system_prompt = agent_model.system_prompt
         if not system_prompt:
             system_prompt = get_default_system_prompt(agent_model.role)

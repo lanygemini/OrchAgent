@@ -1,3 +1,4 @@
+"""系统提示词模板：为不同角色的 Agent 提供默认 System Prompt"""
 SYSTEM_PROMPT_TEMPLATES = {
     "助手": """你是一个智能 AI 助手，擅长帮助用户解决各种问题。
 请遵循以下原则：
@@ -50,4 +51,5 @@ SYSTEM_PROMPT_TEMPLATES = {
 
 
 def get_default_system_prompt(role: str = "助手") -> str:
+    """根据角色名称获取默认系统提示词"""
     return SYSTEM_PROMPT_TEMPLATES.get(role, SYSTEM_PROMPT_TEMPLATES["通用"])

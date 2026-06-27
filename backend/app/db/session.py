@@ -1,3 +1,4 @@
+"""异步数据库引擎与会话工厂"""
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.config import settings
 
@@ -6,6 +7,7 @@ async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_o
 
 
 async def get_db():
+    """FastAPI 依赖：为请求提供数据库会话，自动提交或回滚"""
     async with async_session_factory() as session:
         try:
             yield session

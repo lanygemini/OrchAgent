@@ -1,3 +1,4 @@
+"""工具管理 API：注册、查询、测试工具"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/api/v1/tools", tags=["工具管理"])
 
 @router.post("", response_model=ToolResponse, status_code=201)
 async def create_tool(data: ToolCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """注册新工具"""
     tool = Tool(
         name=data.name,
         description=data.description,
@@ -36,6 +38,7 @@ async def list_tools(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """查询工具列表（支持按类型过滤和分页）"""
     query = select(Tool).where(Tool.owner_id == user.sub)
     if type_filter:
         query = query.where(Tool.type == type_filter)
@@ -52,6 +55,7 @@ async def list_tools(
 
 @router.get("/{tool_id}", response_model=ToolResponse)
 async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取工具详情"""
     result = await db.execute(select(Tool).where(Tool.id == tool_id, Tool.owner_id == user.sub))
     tool = result.scalar_one_or_none()
     if not tool:
@@ -61,6 +65,7 @@ async def get_tool(tool_id: str, db: AsyncSession = Depends(get_db), user=Depend
 
 @router.delete("/{tool_id}", status_code=204)
 async def delete_tool(tool_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """删除工具"""
     result = await db.execute(select(Tool).where(Tool.id == tool_id, Tool.owner_id == user.sub))
     tool = result.scalar_one_or_none()
     if not tool:
@@ -70,6 +75,7 @@ async def delete_tool(tool_id: str, db: AsyncSession = Depends(get_db), user=Dep
 
 @router.post("/{tool_id}/test", response_model=ToolTestResponse)
 async def test_tool(tool_id: str, data: ToolTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """测试工具执行（执行功能待实现）"""
     result = await db.execute(select(Tool).where(Tool.id == tool_id, Tool.owner_id == user.sub))
     tool = result.scalar_one_or_none()
     if not tool:

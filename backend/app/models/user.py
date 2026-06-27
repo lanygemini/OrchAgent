@@ -1,3 +1,4 @@
+"""用户与角色模型：支持 RBAC 权限管理"""
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import String, Boolean, DateTime, Text, Table, Column, ForeignKey
 from app.db.base import Base, UUIDMixin, TimestampMixin
@@ -5,6 +6,7 @@ from datetime import datetime
 from typing import List
 
 
+# 用户 - 角色多对多关联表
 user_role_association = Table(
     "user_role_association",
     Base.metadata,
@@ -14,6 +16,7 @@ user_role_association = Table(
 
 
 class User(Base, UUIDMixin, TimestampMixin):
+    """平台用户"""
     __tablename__ = "users"
 
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
@@ -27,6 +30,7 @@ class User(Base, UUIDMixin, TimestampMixin):
 
 
 class Role(Base, UUIDMixin, TimestampMixin):
+    """角色：定义一组权限（JSON 格式存储权限列表）"""
     __tablename__ = "roles"
 
     name: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)

@@ -1,3 +1,4 @@
+"""LLM 工厂：动态加载不同供应商的 ChatModel，支持回退策略"""
 from typing import Any, Optional, Dict
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
@@ -29,6 +30,8 @@ DEFAULT_MODEL_MAP = {
 
 
 class LLMFactory:
+    """根据供应商名称动态加载对应的 LangChain ChatModel"""
+
     @staticmethod
     def create(
         provider: str,
@@ -62,6 +65,7 @@ class LLMFactory:
 
     @staticmethod
     def get_fallback_provider(primary_provider: str) -> str:
+        """获取当前供应商的降级回退供应商"""
         fallback_chain = {
             "openai": "deepseek",
             "deepseek": "qwen",
@@ -72,6 +76,8 @@ class LLMFactory:
 
 
 class LLMUsageCallback(BaseCallbackHandler):
+    """LangChain Callback：在 LLM 调用结束后收集 token 使用量"""
+
     def __init__(self):
         self.prompt_tokens = 0
         self.completion_tokens = 0

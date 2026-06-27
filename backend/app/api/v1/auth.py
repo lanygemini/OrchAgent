@@ -1,3 +1,4 @@
+"""认证 API：注册、登录、刷新令牌"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -33,6 +34,7 @@ class AuthResponse(BaseModel):
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """注册新用户（自动创建 access_token + refresh_token）"""
     existing = await db.execute(select(User).where((User.username == data.username) | (User.email == data.email)))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
@@ -66,6 +68,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=AuthResponse)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """用户登录（用户名 + 密码）"""
     result = await db.execute(select(User).where(User.username == data.username))
     user = result.scalar_one_or_none()
 
@@ -95,6 +98,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/refresh", response_model=AuthResponse)
 async def refresh_token(data: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """使用 refresh_token 获取新的 access_token"""
     payload = jwt_service.decode_token(data.refresh_token)
     if payload is None or payload.token_type != "refresh":
         raise HTTPException(status_code=401, detail="刷新令牌无效")

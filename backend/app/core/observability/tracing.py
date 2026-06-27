@@ -1,3 +1,4 @@
+"""分布式追踪：基于 OpenTelemetry 的链路追踪（可选）"""
 from typing import Optional
 
 try:
@@ -11,6 +12,7 @@ except ImportError:
 
 
 def setup_tracing(service_name: str = "orchagent", otlp_endpoint: Optional[str] = None):
+    """初始化 OpenTelemetry 追踪（需安装 opentelemetry 相关包）"""
     if not OPENTELEMETRY_AVAILABLE:
         return
 

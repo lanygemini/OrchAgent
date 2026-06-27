@@ -1,3 +1,4 @@
+"""统计 API：获取仪表盘汇总数据"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/api/v1/stats", tags=["统计"])
 
 @router.get("/dashboard", response_model=DashboardStats)
 async def get_dashboard(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取当前用户的仪表盘数据（Agent/工作流/工具/执行次数统计）"""
     agent_count = await db.scalar(select(func.count(Agent.id)).where(Agent.owner_id == user.sub))
     workflow_count = await db.scalar(select(func.count(Workflow.id)).where(Workflow.owner_id == user.sub))
     tool_count = await db.scalar(select(func.count(Tool.id)).where(Tool.owner_id == user.sub))

@@ -1,3 +1,4 @@
+"""工作流相关提示词模板"""
 CONDITION_EVAL_PROMPT = """请根据当前工作流执行状态评估以下条件表达式。
 
 条件表达式：{condition_expr}

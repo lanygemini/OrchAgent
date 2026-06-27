@@ -1,3 +1,4 @@
+"""执行引擎：异步驱动工作流执行，协调编译器 / 流式输出 / 预算控制 / 错误处理"""
 import asyncio
 import json
 from typing import Optional, Dict, Any, List
@@ -18,6 +19,7 @@ from app.models.workflow import Workflow
 
 @dataclass
 class ExecutionContext:
+    """执行上下文：在执行过程中传递的元信息"""
     execution_id: str
     workflow_id: str
     workflow_name: str
@@ -27,6 +29,8 @@ class ExecutionContext:
 
 
 class ExecutionEngine:
+    """工作流执行引擎 — 异步执行 DAG，支持暂停/恢复/取消"""
+
     def __init__(
         self,
         db: AsyncSession,
@@ -50,6 +54,7 @@ class ExecutionEngine:
         user_id: str = "",
         stream: bool = True,
     ) -> WorkflowExecution:
+        """异步执行工作流，返回执行记录"""
         execution = WorkflowExecution(
             workflow_id=workflow.id,
             workflow_name=workflow.name,
@@ -77,6 +82,7 @@ class ExecutionEngine:
         return execution
 
     async def _run_execution(self, ctx: ExecutionContext, execution: WorkflowExecution):
+        """内部执行逻辑：构建 DAG → 编译 LangGraph → 执行 → 结果回写"""
         try:
             execution.status = "running"
             await self.db.flush()
@@ -134,9 +140,11 @@ class ExecutionEngine:
             self._active_tasks.pop(ctx.execution_id, None)
 
     def _build_dag_from_workflow(self, workflow_id: str) -> DAGDefinition:
+        """从数据库工作流构建 DAG 定义（待实现：从 WorkflowNode/Edge 组装）"""
         return DAGDefinition(nodes=[], edges=[], start_node_id="")
 
     async def pause(self, execution_id: str):
+        """暂停执行（取消当前任务并标记状态）"""
         task = self._active_tasks.get(execution_id)
         if task:
             task.cancel()
@@ -151,6 +159,7 @@ class ExecutionEngine:
                 await self.db.flush()
 
     async def resume(self, execution_id: str, human_input: Optional[str] = None):
+        """恢复执行（待实现）"""
         async with self.db.begin():
             result = await self.db.execute(
                 __import__("sqlalchemy").select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
@@ -161,6 +170,7 @@ class ExecutionEngine:
                 await self.db.flush()
 
     async def cancel(self, execution_id: str):
+        """取消执行"""
         task = self._active_tasks.get(execution_id)
         if task:
             task.cancel()

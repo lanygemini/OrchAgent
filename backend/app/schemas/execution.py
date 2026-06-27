@@ -1,15 +1,18 @@
+"""执行相关 Schema：请求执行、执行记录与步骤响应"""
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel
 
 
 class ExecuteRequest(BaseModel):
+    """触发工作流执行的请求体"""
     input_text: str
     variables: Dict[str, Any] = {}
     stream: bool = True
 
 
 class TokenUsage(BaseModel):
+    """Token 消耗概览"""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -17,6 +20,7 @@ class TokenUsage(BaseModel):
 
 
 class ExecutionResponse(BaseModel):
+    """执行记录响应体"""
     id: str
     workflow_id: str
     workflow_name: str
@@ -33,6 +37,7 @@ class ExecutionResponse(BaseModel):
 
 
 class ExecutionStepResponse(BaseModel):
+    """执行步骤响应体"""
     id: str
     execution_id: str
     node_id: str

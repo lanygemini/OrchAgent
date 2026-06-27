@@ -1,3 +1,4 @@
+"""定时任务定义：记忆衰减清理、Token 用量同步、记忆提取"""
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from app.core.memory.extractor import MemoryExtractor
 
 
 async def cleanup_memories(ctx: dict) -> dict:
+    """定时任务：记忆衰减 + 清理过期记忆"""
     async with async_session_factory() as db:
         store = EpisodicMemoryStore(db)
         await store.decay(decay_factor=0.95)
@@ -17,10 +19,12 @@ async def cleanup_memories(ctx: dict) -> dict:
 
 
 async def sync_token_usage(ctx: dict) -> dict:
+    """定时任务：同步 Token 用量数据到持久层（占位）"""
     return {"status": "done", "task": "sync_token_usage", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 async def extract_memories(ctx: dict, agent_id: str, session_id: str, messages: list) -> dict:
+    """后台任务：从对话中提取记忆"""
     async with async_session_factory() as db:
         extractor = MemoryExtractor(db)
         count = await extractor.extract_from_conversation(

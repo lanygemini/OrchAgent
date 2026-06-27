@@ -1,3 +1,4 @@
+"""工作流编译器：将 DAG 定义编译为可执行的 LangGraph StateGraph"""
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 
@@ -13,6 +14,7 @@ from app.core.memory.extractor import MemoryExtractor
 
 @dataclass
 class DAGNode:
+    """DAG 节点定义"""
     id: str
     type: str
     label: str = ""
@@ -25,6 +27,7 @@ class DAGNode:
 
 @dataclass
 class DAGEdge:
+    """DAG 边定义"""
     id: str
     source_node_id: str
     target_node_id: str
@@ -34,16 +37,20 @@ class DAGEdge:
 
 @dataclass
 class DAGDefinition:
+    """完整的 DAG 定义"""
     nodes: List[DAGNode]
     edges: List[DAGEdge]
     start_node_id: str
 
 
 class ValidationError(Exception):
+    """工作流校验失败异常"""
     pass
 
 
 class WorkflowCompiler:
+    """将 DAG 定义编译为 LangGraph StateGraph，每种节点类型对应一个 handler"""
+
     def __init__(
         self,
         agent_manager: Optional[AgentManager] = None,
@@ -53,6 +60,7 @@ class WorkflowCompiler:
         self.memory_store = memory_store
 
     def validate(self, dag: DAGDefinition) -> List[str]:
+        """校验 DAG 定义：检查节点完整性、边的合法性"""
         errors = []
         node_ids = {n.id for n in dag.nodes}
 
@@ -70,6 +78,7 @@ class WorkflowCompiler:
         return errors
 
     def compile(self, dag: DAGDefinition) -> StateGraph:
+        """将 DAG 编译为 LangGraph StateGraph"""
         errors = self.validate(dag)
         if errors:
             raise ValidationError("；".join(errors))
@@ -82,6 +91,7 @@ class WorkflowCompiler:
             handler = self._get_node_handler(node)
             graph.add_node(node.id, handler)
 
+        # 按源节点分组边
         edges_from_source: Dict[str, List[DAGEdge]] = {}
         for edge in dag.edges:
             edges_from_source.setdefault(edge.source_node_id, []).append(edge)
@@ -91,6 +101,7 @@ class WorkflowCompiler:
             if len(outgoing) == 1:
                 edge = outgoing[0]
                 if edge.condition_expr:
+                    # 单条条件边（条件评估为真时走此边）
                     def make_router(expr: str):
                         def router(state: AgentState) -> str:
                             try:
@@ -103,6 +114,7 @@ class WorkflowCompiler:
                 else:
                     graph.add_edge(node.id, edge.target_node_id)
             elif len(outgoing) > 1:
+                # 多条出边：条件分支路由
                 has_conditions = any(e.condition_expr for e in outgoing)
                 if has_conditions:
                     def make_router(edges: List[DAGEdge]):
@@ -126,6 +138,7 @@ class WorkflowCompiler:
         return graph
 
     def _get_node_handler(self, node: DAGNode) -> Callable:
+        """根据节点类型返回对应的处理函数"""
         handlers = {
             "agent": self._handle_agent_node,
             "tool": self._handle_tool_node,
@@ -139,15 +152,19 @@ class WorkflowCompiler:
         return handlers.get(node.type, self._handle_noop)
 
     async def _handle_start_node(self, state: AgentState) -> AgentState:
+        """起始节点：透传状态"""
         return state
 
     async def _handle_end_node(self, state: AgentState) -> AgentState:
+        """结束节点：透传状态"""
         return state
 
     async def _handle_noop(self, state: AgentState) -> AgentState:
+        """空操作节点"""
         return state
 
     async def _handle_agent_node(self, state: AgentState) -> AgentState:
+        """Agent 节点：调用 AgentRuntime 进行处理"""
         agent_id = state.get("current_node", "")
         runtime = self.agent_manager.get_runtime(agent_id)
         if not runtime:
@@ -160,6 +177,7 @@ class WorkflowCompiler:
         return state
 
     async def _handle_tool_node(self, state: AgentState) -> AgentState:
+        """工具节点：调用注册的工具执行"""
         tool_id = state.get("current_node", "")
         tool = tool_registry.get(tool_id)
         if not tool:
@@ -170,14 +188,18 @@ class WorkflowCompiler:
         return state
 
     async def _handle_condition_node(self, state: AgentState) -> AgentState:
+        """条件节点：占位，由边上的条件表达式处理"""
         return state
 
     async def _handle_fork_node(self, state: AgentState) -> AgentState:
+        """分支节点：占位"""
         return state
 
     async def _handle_join_node(self, state: AgentState) -> AgentState:
+        """汇合节点：占位"""
         return state
 
     async def _handle_human_node(self, state: AgentState) -> AgentState:
+        """人工节点：标记需要人工输入"""
         state["needs_human_input"] = True
         return state

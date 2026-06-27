@@ -1,3 +1,4 @@
+"""日志配置：使用 structlog 实现结构化日志（开发模式彩色控制台 / 生产模式 JSON）"""
 import structlog
 import logging
 from pathlib import Path
@@ -5,10 +6,12 @@ from app.config import settings
 
 
 def setup_logging(env: str = "prod"):
+    """配置 structlog 日志处理器"""
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
 
     if env == "dev":
+        # 开发模式：彩色控制台输出
         structlog.configure(
             processors=[
                 structlog.stdlib.add_log_level,
@@ -18,6 +21,7 @@ def setup_logging(env: str = "prod"):
             logger_factory=structlog.PrintLoggerFactory(),
         )
     else:
+        # 生产模式：JSON 格式写入文件
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,

@@ -1,3 +1,4 @@
+"""API 路由汇总 — 自动注册所有 V1 路由模块"""
 from fastapi import APIRouter
 
 from app.api.v1 import agents, tools, mcp, workflows, executions, memories, stats, auth

@@ -1,3 +1,4 @@
+"""成本控制模块：token 用量计算、预算检查、费用估算"""
 from typing import Dict, Optional, Any
 from datetime import datetime, timezone, date
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from sqlalchemy import select, func
 from app.models.token_usage import TokenUsageRecord, TokenBudget
 
 
+# 各模型定价（美元 / 百万 token）
 MODEL_PRICING: Dict[str, Dict[str, Dict[str, float]]] = {
     "openai": {
         "gpt-4o": {"input": 2.50, "output": 10.00},
@@ -36,6 +38,7 @@ MODEL_PRICING: Dict[str, Dict[str, Dict[str, float]]] = {
 
 @dataclass
 class BudgetStatus:
+    """预算检查结果"""
     within_budget: bool = True
     daily_usage: int = 0
     daily_limit: int = 100000
@@ -45,6 +48,8 @@ class BudgetStatus:
 
 
 class CostCalculator:
+    """费用估算器：根据 token 用量和模型定价计算费用"""
+
     @staticmethod
     def estimate_cost(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> float:
         pricing = MODEL_PRICING.get(provider, {}).get(model, {"input": 0.0, "output": 0.0})
@@ -54,10 +59,13 @@ class CostCalculator:
 
 
 class BudgetController:
+    """预算控制器：检查用户预算限额并记录用量"""
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
     async def check_budget(self, user_id: str) -> BudgetStatus:
+        """检查用户是否超出预算"""
         result = await self.db.execute(
             select(TokenBudget).where(TokenBudget.user_id == user_id)
         )
@@ -91,9 +99,11 @@ class BudgetController:
         return status
 
     async def record_usage(self, record: TokenUsageRecord):
+        """记录一次 token 用量"""
         self.db.add(record)
 
     async def _get_daily_usage(self, user_id: str, day: date) -> int:
+        """查询用户指定日期的总 token 用量"""
         result = await self.db.execute(
             select(func.coalesce(func.sum(TokenUsageRecord.total_tokens), 0))
             .where(
@@ -104,6 +114,7 @@ class BudgetController:
         return result.scalar() or 0
 
     async def _get_monthly_cost(self, user_id: str, day: date) -> float:
+        """查询用户当月的总费用"""
         first_day = day.replace(day=1)
         result = await self.db.execute(
             select(func.coalesce(func.sum(TokenUsageRecord.estimated_cost), 0.0))

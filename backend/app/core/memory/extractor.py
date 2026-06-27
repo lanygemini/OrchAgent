@@ -1,3 +1,4 @@
+"""记忆提取器：从对话中识别和提取值得长期记忆的信息"""
 import json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,8 @@ from app.core.prompts.memory_prompts import MEMORY_EXTRACTION_PROMPT
 
 
 class MemoryExtractor:
+    """记忆提取器 — 使用 LLM 从对话中提取关键信息并存入情景记忆"""
+
     def __init__(self, db: AsyncSession, llm=None):
         self.db = db
         self.llm = llm
@@ -19,16 +22,18 @@ class MemoryExtractor:
         messages: List[Dict[str, Any]],
         importance: float = 0.5,
     ) -> int:
+        """从对话消息中提取记忆，返回提取数量"""
         if not messages:
             return 0
 
         combined = "\n".join(
             f"{m.get('role', 'user')}: {m.get('content', '')}"
-            for m in messages[-20:]
+            for m in messages[-20:]  # 只取最近 20 条消息
         )
 
         extracted_count = 0
 
+        # 如果配置了 LLM，则使用 LLM 提取结构化记忆
         if self.llm:
             try:
                 prompt = MEMORY_EXTRACTION_PROMPT.format(messages=combined)
@@ -46,6 +51,7 @@ class MemoryExtractor:
             except Exception:
                 pass
 
+        # LLM 提取失败或无结果时，保存原始消息片段作为回退
         if extracted_count == 0:
             await self.episodic_store.store(
                 agent_id=agent_id,
@@ -60,6 +66,7 @@ class MemoryExtractor:
         return extracted_count
 
     def _parse_extraction_result(self, text: str) -> list:
+        """从 LLM 返回文本中解析 JSON 数组"""
         try:
             json_start = text.find("[")
             json_end = text.rfind("]")

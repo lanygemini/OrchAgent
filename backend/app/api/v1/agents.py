@@ -1,3 +1,4 @@
+"""Agent CRUD API：创建、查询、更新、删除、测试 Agent"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/api/v1/agents", tags=["Agent 管理"])
 
 @router.post("", response_model=AgentResponse, status_code=201)
 async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """创建新的 Agent"""
     system_prompt = data.system_prompt
     if not system_prompt:
         system_prompt = get_default_system_prompt(data.role)
@@ -45,6 +47,7 @@ async def list_agents(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """查询当前用户的 Agent 列表（支持分页和名称搜索）"""
     query = select(Agent).where(Agent.owner_id == user.sub)
     if search:
         query = query.where(Agent.name.ilike(f"%{search}%"))
@@ -61,6 +64,7 @@ async def list_agents(
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取单个 Agent 详情"""
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.owner_id == user.sub))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -70,6 +74,7 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db), user=Depe
 
 @router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(agent_id: str, data: AgentUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """更新 Agent 配置"""
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.owner_id == user.sub))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -86,6 +91,7 @@ async def update_agent(agent_id: str, data: AgentUpdate, db: AsyncSession = Depe
 
 @router.delete("/{agent_id}", status_code=204)
 async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """删除 Agent"""
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.owner_id == user.sub))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -95,6 +101,7 @@ async def delete_agent(agent_id: str, db: AsyncSession = Depends(get_db), user=D
 
 @router.post("/{agent_id}/test")
 async def test_agent(agent_id: str, data: AgentTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """测试 Agent（LLM 调用待实现）"""
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.owner_id == user.sub))
     agent = result.scalar_one_or_none()
     if not agent:

@@ -1,3 +1,4 @@
+"""知识记忆存储：持久化的结构化知识库（支持版本管理）"""
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,8 @@ from app.models.memory import KnowledgeMemory
 
 
 class KnowledgeMemoryStore:
+    """知识记忆存储器 — 管理持久化的结构化知识（支持 upsert）"""
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -19,6 +22,7 @@ class KnowledgeMemoryStore:
         metadata: Optional[Dict[str, Any]] = None,
         embedding: Optional[List[float]] = None,
     ) -> KnowledgeMemory:
+        """创建或更新知识条目（存在则更新版本号）"""
         result = await self.db.execute(
             select(KnowledgeMemory).where(
                 KnowledgeMemory.namespace == namespace,
@@ -57,6 +61,7 @@ class KnowledgeMemoryStore:
         namespace: Optional[str] = None,
         top_k: int = 5,
     ) -> List[KnowledgeMemory]:
+        """按命名空间检索知识条目（按版本降序）"""
         stmt = select(KnowledgeMemory)
         if namespace:
             stmt = stmt.where(KnowledgeMemory.namespace == namespace)
@@ -65,6 +70,7 @@ class KnowledgeMemoryStore:
         return result.scalars().all()
 
     async def delete(self, namespace: str, key: str):
+        """删除知识条目"""
         from sqlalchemy import delete as sa_delete
         await self.db.execute(
             sa_delete(KnowledgeMemory).where(

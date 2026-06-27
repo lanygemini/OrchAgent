@@ -1,9 +1,11 @@
+"""情景记忆状态定义（AgentState 中的记忆相关字段复用）"""
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
 
 class MemoryItem(TypedDict):
+    """记忆条目"""
     id: str
     content: str
     memory_type: str
@@ -12,6 +14,7 @@ class MemoryItem(TypedDict):
 
 
 class AgentState(TypedDict):
+    """工作流执行状态（同 workflow/state.py，此处为 memory 模块引用便利）"""
     messages: Annotated[List[BaseMessage], add_messages]
     workflow_id: str
     execution_id: str

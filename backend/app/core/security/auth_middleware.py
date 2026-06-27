@@ -1,3 +1,4 @@
+"""认证中间件：从 Authorization 请求头解析 JWT 并注入 request.state.user"""
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -5,7 +6,10 @@ from app.core.security.jwt_service import jwt_service
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    """JWT 认证中间件 — 白名单路径跳过，其余路径要求 Bearer Token"""
+
     async def dispatch(self, request: Request, call_next):
+        # 白名单路径：无需认证
         if request.url.path in ("/health", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/register", "/api/v1/auth/login"):
             return await call_next(request)
 

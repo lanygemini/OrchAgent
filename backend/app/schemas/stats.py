@@ -1,8 +1,10 @@
+"""统计面板 Schema"""
 from typing import List, Dict, Any
 from pydantic import BaseModel
 
 
 class DashboardStats(BaseModel):
+    """仪表盘统计数据"""
     total_agents: int = 0
     total_workflows: int = 0
     total_tools: int = 0

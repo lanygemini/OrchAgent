@@ -1,3 +1,4 @@
+"""内置日期时间工具：获取当前 UTC 时间并按指定格式输出"""
 from datetime import datetime, timezone
 from typing import Type, Optional
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ class DateTimeInput(BaseModel):
 
 
 class DateTimeTool(BuiltinTool):
+    """获取当前 UTC 日期和时间"""
     name: str = "datetime"
     description: str = "获取当前日期和时间，可按指定格式输出"
     args_schema: Type[BaseModel] = DateTimeInput

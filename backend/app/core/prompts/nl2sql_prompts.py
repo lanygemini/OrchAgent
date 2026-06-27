@@ -1,3 +1,4 @@
+"""NL2SQL 翻译提示词模板"""
 NL2SQL_TRANSLATION_PROMPT = """你是一个专业的 NL2SQL 翻译助手。请将用户的自然语言查询翻译为 SQL 查询语句。
 
 数据库表结构：

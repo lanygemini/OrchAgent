@@ -1,3 +1,4 @@
+"""内置计算器工具：安全地解析和计算数学表达式（白名单运算符）"""
 import ast
 import operator
 from typing import Any, Type, Optional
@@ -10,6 +11,7 @@ class CalculatorInput(BaseModel):
     expression: str = Field(..., description="要计算的数学表达式（例如：'2 + 3 * 4'）")
 
 
+# 白名单运算符映射
 _SAFE_OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -24,6 +26,7 @@ _SAFE_OPERATORS = {
 
 
 class CalculatorTool(BuiltinTool):
+    """安全计算器 — 通过 AST 解析只允许白名单运算，防止注入"""
     name: str = "calculator"
     description: str = "安全计算数学表达式。支持 +、-、*、/、**、//、%"
     args_schema: Type[BaseModel] = CalculatorInput
@@ -40,6 +43,7 @@ class CalculatorTool(BuiltinTool):
         return self._run(expression)
 
     def _safe_eval(self, node):
+        """递归安全求值 AST 节点（只允许白名单运算符和常量）"""
         if isinstance(node, ast.Expression):
             return self._safe_eval(node.body)
         elif isinstance(node, ast.Constant):

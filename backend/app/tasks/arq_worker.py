@@ -1,3 +1,4 @@
+"""ARQ Worker 配置：定义工作进程的 Redis 连接和注册函数"""
 from arq.connections import RedisSettings
 from app.config import settings
 

@@ -1,3 +1,4 @@
+"""MCP 集成 API：注册 MCP 服务器、发现工具、导入工具、健康检查"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/api/v1/mcp", tags=["MCP 集成"])
 
 @router.post("/servers", response_model=MCPServerResponse, status_code=201)
 async def register_mcp_server(data: MCPServerCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """注册 MCP 服务器"""
     server = MCPServer(
         name=data.name,
         description=data.description,
@@ -33,6 +35,7 @@ async def register_mcp_server(data: MCPServerCreate, db: AsyncSession = Depends(
 
 @router.get("/servers")
 async def list_mcp_servers(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """列出已注册的 MCP 服务器"""
     result = await db.execute(select(MCPServer).where(MCPServer.owner_id == user.sub).order_by(MCPServer.created_at.desc()))
     servers = result.scalars().all()
     return {"items": [MCPServerResponse.model_validate(s) for s in servers]}
@@ -40,6 +43,7 @@ async def list_mcp_servers(db: AsyncSession = Depends(get_db), user=Depends(get_
 
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(server_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取 MCP 服务器详情"""
     result = await db.execute(select(MCPServer).where(MCPServer.id == server_id, MCPServer.owner_id == user.sub))
     server = result.scalar_one_or_none()
     if not server:
@@ -49,6 +53,7 @@ async def get_mcp_server(server_id: str, db: AsyncSession = Depends(get_db), use
 
 @router.get("/servers/{server_id}/tools", response_model=MCPToolsResponse)
 async def discover_mcp_tools(server_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """发现 MCP 服务器提供的工具列表（实现待完成）"""
     result = await db.execute(select(MCPServer).where(MCPServer.id == server_id, MCPServer.owner_id == user.sub))
     server = result.scalar_one_or_none()
     if not server:
@@ -58,6 +63,7 @@ async def discover_mcp_tools(server_id: str, db: AsyncSession = Depends(get_db),
 
 @router.post("/servers/{server_id}/import", status_code=200)
 async def import_mcp_tools(server_id: str, tool_names: List[str], db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """从 MCP 服务器导入工具到平台（实现待完成）"""
     result = await db.execute(select(MCPServer).where(MCPServer.id == server_id, MCPServer.owner_id == user.sub))
     server = result.scalar_one_or_none()
     if not server:
@@ -67,6 +73,7 @@ async def import_mcp_tools(server_id: str, tool_names: List[str], db: AsyncSessi
 
 @router.delete("/servers/{server_id}", status_code=204)
 async def delete_mcp_server(server_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """删除 MCP 服务器"""
     result = await db.execute(select(MCPServer).where(MCPServer.id == server_id, MCPServer.owner_id == user.sub))
     server = result.scalar_one_or_none()
     if not server:
@@ -76,6 +83,7 @@ async def delete_mcp_server(server_id: str, db: AsyncSession = Depends(get_db), 
 
 @router.get("/servers/{server_id}/health")
 async def health_check_mcp_server(server_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """检查 MCP 服务器健康状态（实现待完成）"""
     result = await db.execute(select(MCPServer).where(MCPServer.id == server_id, MCPServer.owner_id == user.sub))
     server = result.scalar_one_or_none()
     if not server:

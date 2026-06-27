@@ -1,3 +1,4 @@
+"""工作流管理 API：CRUD + 校验"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/api/v1/workflows", tags=["工作流管理"])
 
 @router.post("", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(data: WorkflowCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """创建新工作流（包含 DAG 定义）"""
     workflow = Workflow(
         name=data.name,
         description=data.description,
@@ -56,6 +58,7 @@ async def list_workflows(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """查询工作流列表（分页）"""
     query = select(Workflow).where(Workflow.owner_id == user.sub)
     count_query = select(func.count()).select_from(query.subquery())
     total = await db.scalar(count_query)
@@ -69,6 +72,7 @@ async def list_workflows(
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(workflow_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取工作流详情（包含 DAG 定义）"""
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == user.sub))
     workflow = result.scalar_one_or_none()
     if not workflow:
@@ -87,6 +91,7 @@ async def get_workflow(workflow_id: str, db: AsyncSession = Depends(get_db), use
 
 @router.put("/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(workflow_id: str, data: WorkflowUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """更新工作流（可替换整个 DAG）"""
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == user.sub))
     workflow = result.scalar_one_or_none()
     if not workflow:
@@ -134,6 +139,7 @@ async def update_workflow(workflow_id: str, data: WorkflowUpdate, db: AsyncSessi
 
 @router.delete("/{workflow_id}", status_code=204)
 async def delete_workflow(workflow_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """删除工作流（级联删除节点和边）"""
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == user.sub))
     workflow = result.scalar_one_or_none()
     if not workflow:
@@ -143,6 +149,7 @@ async def delete_workflow(workflow_id: str, db: AsyncSession = Depends(get_db), 
 
 @router.post("/{workflow_id}/validate", response_model=WorkflowValidateResponse)
 async def validate_workflow(workflow_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """校验工作流 DAG 的合法性"""
     result = await db.execute(select(Workflow).where(Workflow.id == workflow_id, Workflow.owner_id == user.sub))
     workflow = result.scalar_one_or_none()
     if not workflow:

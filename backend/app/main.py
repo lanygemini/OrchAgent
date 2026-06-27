@@ -1,3 +1,4 @@
+"""OrchAgent 后端入口 — FastAPI 应用初始化"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from app.db.base import Base
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """开发模式下启动时自动创建所有数据库表"""
     if settings.environment == "dev":
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -47,4 +49,5 @@ app.include_router(api_router)
 
 @app.get("/health")
 async def health():
+    """健康检查接口"""
     return {"status": "ok", "version": "0.1.0", "environment": settings.environment, "message": "服务运行正常"}

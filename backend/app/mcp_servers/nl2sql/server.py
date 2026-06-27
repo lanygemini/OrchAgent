@@ -1,3 +1,4 @@
+"""NL2SQL MCP 服务器：提供自然语言转 SQL 和 SQL 执行（安全约束）能力"""
 import asyncio
 import json
 import re
@@ -12,15 +13,18 @@ except ImportError:
     MCP_AVAILABLE = False
 
 
+# 禁止的 SQL 关键词（写入/删除/修改操作）
 FORBIDDEN_SQL_KEYWORDS = [
     "DROP", "ALTER", "TRUNCATE", "DELETE", "INSERT", "UPDATE",
     "CREATE", "GRANT", "REVOKE", "EXEC", "EXECUTE",
 ]
 
+# 允许的 SQL 前缀（只读查询）
 ALLOWED_SQL_PREFIXES = ["SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"]
 
 
 def validate_sql(sql: str) -> tuple[bool, str]:
+    """SQL 安全性校验：只允许只读查询"""
     sql_upper = sql.strip().upper()
 
     for keyword in FORBIDDEN_SQL_KEYWORDS:
@@ -41,6 +45,7 @@ def validate_sql(sql: str) -> tuple[bool, str]:
 
 
 def create_nl2sql_server() -> Optional[object]:
+    """创建 NL2SQL MCP 服务器实例"""
     if not MCP_AVAILABLE:
         return None
 
@@ -97,6 +102,7 @@ def create_nl2sql_server() -> Optional[object]:
 
 
 async def run_server():
+    """运行 NL2SQL MCP 服务器（stdio 模式）"""
     app = create_nl2sql_server()
     if app is None:
         print("MCP 包不可用。请执行: pip install mcp")

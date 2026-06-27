@@ -1,3 +1,4 @@
+"""JWT 认证服务：Token 创建、解码、密码哈希"""
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import uuid4
@@ -12,6 +13,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class TokenPayload:
+    """JWT Token 载荷结构"""
+
     def __init__(
         self,
         sub: str,
@@ -24,11 +27,11 @@ class TokenPayload:
         jti: str,
         session_id: str,
     ):
-        self.sub = sub
+        self.sub = sub              # 用户 ID
         self.username = username
         self.roles = roles
         self.permissions = permissions
-        self.token_type = token_type
+        self.token_type = token_type  # access / refresh
         self.iat = iat
         self.exp = exp
         self.jti = jti
@@ -36,6 +39,8 @@ class TokenPayload:
 
 
 class JWTService:
+    """JWT 令牌服务"""
+
     def __init__(self):
         self.secret = settings.jwt_secret
         self.algorithm = settings.jwt_algorithm
@@ -43,6 +48,7 @@ class JWTService:
         self.refresh_expire = settings.refresh_token_expire_days * 86400
 
     def create_access_token(self, user_id: str, username: str, roles: List[str], permissions: List[str], session_id: str) -> str:
+        """创建访问令牌（短有效期）"""
         now = datetime.now(timezone.utc)
         payload = {
             "sub": user_id,
@@ -58,6 +64,7 @@ class JWTService:
         return jwt.encode(payload, self.secret, algorithm=self.algorithm)
 
     def create_refresh_token(self, user_id: str, session_id: str) -> str:
+        """创建刷新令牌（长有效期）"""
         now = datetime.now(timezone.utc)
         payload = {
             "sub": user_id,
@@ -70,6 +77,7 @@ class JWTService:
         return jwt.encode(payload, self.secret, algorithm=self.algorithm)
 
     def decode_token(self, token: str) -> Optional[TokenPayload]:
+        """解码并验证令牌"""
         try:
             payload = jwt.decode(token, self.secret, algorithms=[self.algorithm])
             return TokenPayload(**payload)
@@ -78,10 +86,12 @@ class JWTService:
 
     @staticmethod
     def hash_password(password: str) -> str:
+        """密码哈希（bcrypt）"""
         return pwd_context.hash(password)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """验证密码"""
         return pwd_context.verify(plain_password, hashed_password)
 
 

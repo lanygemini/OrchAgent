@@ -1,9 +1,11 @@
+"""Agent 相关 Pydantic Schema：请求 / 响应数据模型"""
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 
 class AgentCreate(BaseModel):
+    """创建 Agent 的请求体"""
     name: str = Field(..., min_length=1, max_length=128)
     role: str = "助手"
     description: str = ""
@@ -18,6 +20,7 @@ class AgentCreate(BaseModel):
 
 
 class AgentUpdate(BaseModel):
+    """更新 Agent 的请求体（所有字段可选）"""
     name: Optional[str] = None
     role: Optional[str] = None
     description: Optional[str] = None
@@ -32,6 +35,7 @@ class AgentUpdate(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    """Agent 响应体"""
     id: str
     name: str
     role: str
@@ -53,6 +57,7 @@ class AgentResponse(BaseModel):
 
 
 class AgentListResponse(BaseModel):
+    """Agent 列表响应体（带分页）"""
     items: List[AgentResponse]
     total: int
     page: int
@@ -60,5 +65,6 @@ class AgentListResponse(BaseModel):
 
 
 class AgentTestRequest(BaseModel):
+    """测试 Agent 的请求体"""
     input_text: str
     stream: bool = True

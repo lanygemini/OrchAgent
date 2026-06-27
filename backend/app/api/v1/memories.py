@@ -1,3 +1,4 @@
+"""记忆 API：提取 / 查询 / 搜索 / 清除情景记忆，管理知识记忆"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/api/v1/memories", tags=["Memories"])
 
 @router.post("/{agent_id}/extract")
 async def extract_memories(agent_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """从对话中提取记忆（实现待完成）"""
     return {"message": "记忆提取端点（实现待完成）", "agent_id": agent_id}
 
 
@@ -22,6 +24,7 @@ async def list_memories(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """查询 Agent 的情景记忆列表"""
     query = select(EpisodicMemory).where(EpisodicMemory.agent_id == agent_id)
     if memory_type:
         query = query.where(EpisodicMemory.memory_type == memory_type)
@@ -33,6 +36,7 @@ async def list_memories(
 
 @router.delete("/{agent_id}", status_code=204)
 async def clear_memories(agent_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """清除 Agent 的所有情景记忆"""
     await db.execute(delete(EpisodicMemory).where(EpisodicMemory.agent_id == agent_id))
 
 
@@ -44,6 +48,7 @@ async def search_memories(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    """搜索 Agent 的记忆（按重要性排序）"""
     result = await db.execute(
         select(EpisodicMemory).where(EpisodicMemory.agent_id == agent_id, EpisodicMemory.is_active == True)
         .order_by(EpisodicMemory.importance.desc()).limit(top_k)
@@ -54,6 +59,7 @@ async def search_memories(
 
 @router.post("/knowledge")
 async def create_knowledge(data: KnowledgeMemoryCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """创建知识记忆条目"""
     km = KnowledgeMemory(
         namespace=data.namespace,
         key=data.key,

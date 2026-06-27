@@ -1,3 +1,4 @@
+"""Docker 沙箱：在隔离容器中执行用户代码（支持资源限制和超时）"""
 import asyncio
 import tempfile
 import os
@@ -8,6 +9,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SandboxResult:
+    """沙箱执行结果"""
     success: bool
     output: str = ""
     error: Optional[str] = None
@@ -15,6 +17,8 @@ class SandboxResult:
 
 
 class DockerSandbox:
+    """Docker 沙箱执行器 — 在 python:3.12-slim 容器中安全运行代码"""
+
     def __init__(self, cpu_limit: float = 0.5, memory_limit_mb: int = 256, timeout_s: int = 10, network_enabled: bool = False):
         self.cpu_limit = cpu_limit
         self.memory_limit_mb = memory_limit_mb
@@ -23,9 +27,11 @@ class DockerSandbox:
         self._available = self._check_docker()
 
     def _check_docker(self) -> bool:
+        """检查 Docker 是否可用（暂未实现）"""
         return False
 
     async def execute(self, code: str, input_data: Optional[Dict[str, Any]] = None) -> SandboxResult:
+        """在沙箱中执行 Python 代码"""
         if not self._available:
             return SandboxResult(success=False, output="", error="Docker 不可用")
 

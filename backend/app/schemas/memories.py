@@ -1,14 +1,17 @@
+"""记忆系统 Schema：情景记忆查询 / 知识记忆 CRUD"""
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
 
 class MemorySearchRequest(BaseModel):
+    """记忆搜索请求体"""
     query: str = Field(..., min_length=1)
     top_k: int = 5
 
 
 class MemoryResponse(BaseModel):
+    """情景记忆响应体"""
     id: str
     agent_id: str
     session_id: Optional[str]
@@ -23,6 +26,7 @@ class MemoryResponse(BaseModel):
 
 
 class KnowledgeMemoryCreate(BaseModel):
+    """创建知识记忆的请求体"""
     namespace: str
     key: str
     content: str
@@ -31,6 +35,7 @@ class KnowledgeMemoryCreate(BaseModel):
 
 
 class KnowledgeMemoryResponse(BaseModel):
+    """知识记忆响应体"""
     id: str
     namespace: str
     key: str

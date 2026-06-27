@@ -1,3 +1,4 @@
+"""错误处理模块：重试策略、熔断器、降级管理器"""
 import asyncio
 import random
 import time
@@ -10,6 +11,7 @@ T = TypeVar("T")
 
 
 class ErrorCode(str, Enum):
+    """系统错误码枚举"""
     LLM_TIMEOUT = "E_LLM_TIMEOUT"
     LLM_RATE_LIMITED = "E_LLM_RATE_LIMITED"
     LLM_TOKEN_OVERFLOW = "E_LLM_TOKEN_OVERFLOW"
@@ -33,12 +35,14 @@ class ErrorCode(str, Enum):
 
 
 class ErrorSeverity(str, Enum):
-    RETRYABLE = "retryable"
-    DEGRADABLE = "degradable"
-    NEEDS_HUMAN = "needs_human"
-    FATAL = "fatal"
+    """错误严重级别"""
+    RETRYABLE = "retryable"    # 可重试
+    DEGRADABLE = "degradable"  # 可降级
+    NEEDS_HUMAN = "needs_human"  # 需要人工介入
+    FATAL = "fatal"            # 致命错误
 
 
+# 错误码 → 严重级别映射
 ERROR_SEVERITY_MAP: Dict[ErrorCode, ErrorSeverity] = {
     ErrorCode.LLM_TIMEOUT: ErrorSeverity.RETRYABLE,
     ErrorCode.LLM_RATE_LIMITED: ErrorSeverity.RETRYABLE,
@@ -55,6 +59,8 @@ ERROR_SEVERITY_MAP: Dict[ErrorCode, ErrorSeverity] = {
 
 
 class OrchAgentError(Exception):
+    """系统自定义异常（携带错误码和严重级别）"""
+
     def __init__(self, code: ErrorCode, message: str, severity: Optional[ErrorSeverity] = None):
         self.code = code
         self.severity = severity or ERROR_SEVERITY_MAP.get(code, ErrorSeverity.FATAL)
@@ -63,6 +69,7 @@ class OrchAgentError(Exception):
 
 @dataclass
 class RetryConfig:
+    """重试策略配置"""
     max_retries: int = 3
     base_delay: float = 1.0
     max_delay: float = 60.0
@@ -71,10 +78,13 @@ class RetryConfig:
 
 
 class RetryHandler:
+    """重试处理器：支持指数退避 + 随机抖动"""
+
     def __init__(self, config: Optional[RetryConfig] = None):
         self.config = config or RetryConfig()
 
     async def execute_with_retry(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
+        """执行函数并在可重试错误时自动重试"""
         last_error: Optional[Exception] = None
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -93,6 +103,7 @@ class RetryHandler:
         raise last_error or OrchAgentError(ErrorCode.SYS_INTERNAL, "超过最大重试次数")
 
     def _get_delay(self, attempt: int) -> float:
+        """计算退避延迟时间（指数退避 + 随机抖动）"""
         delay = min(
             self.config.base_delay * (self.config.backoff_multiplier ** attempt),
             self.config.max_delay,
@@ -103,12 +114,15 @@ class RetryHandler:
 
 
 class CircuitBreakerState(Enum):
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
+    """熔断器状态"""
+    CLOSED = "closed"       # 正常
+    OPEN = "open"           # 断开
+    HALF_OPEN = "half_open"  # 半开（探活）
 
 
 class CircuitBreaker:
+    """熔断器模式：在连续故障时快速失败，避免级联错误"""
+
     def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0, half_open_max_calls: int = 3):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -120,7 +134,9 @@ class CircuitBreaker:
         self.half_open_calls = 0
 
     async def call(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
+        """在熔断保护下执行函数"""
         if self.state == CircuitBreakerState.OPEN:
+            # 检查是否过了恢复时间
             if self.last_failure_time and (datetime.now() - self.last_failure_time) > timedelta(seconds=self.recovery_timeout):
                 self.state = CircuitBreakerState.HALF_OPEN
                 self.half_open_calls = 0
@@ -153,6 +169,8 @@ class CircuitBreaker:
 
 
 class FallbackManager:
+    """降级管理：在主供应商失败时切换到备用供应商"""
+
     def __init__(self, fallback_providers: Dict[str, str]):
         self.fallback_providers = fallback_providers
 

@@ -1,3 +1,4 @@
+"""MCP 桥接：将 MCP 服务器暴露的工具包装为平台 BaseTool"""
 import json
 from typing import Any, Type, Optional, Dict
 from pydantic import BaseModel, create_model
@@ -8,6 +9,7 @@ from app.core.tool.mcp.manager import MCPManager, MCPToolDef
 
 
 class MCPToolWrapper(BaseTool):
+    """MCP 工具包装器：将外部的 MCP 工具适配为平台 BaseTool"""
     name: str = ""
     description: str = ""
     args_schema: Type[BaseModel] = BaseModel
@@ -46,6 +48,7 @@ def create_mcp_tool_wrapper(
     server_id: str,
     tool_def: MCPToolDef,
 ) -> MCPToolWrapper:
+    """从 MCP 工具定义创建包装器（自动根据 input_schema 生成 Pydantic 参数模型）"""
     fields = {}
     if tool_def.input_schema and "properties" in tool_def.input_schema:
         for prop_name, prop_schema in tool_def.input_schema["properties"].items():
