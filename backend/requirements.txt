@@ -45,7 +45,7 @@ opentelemetry-exporter-otlp>=1.29.0
 
 # Security
 pyJWT>=2.10.0
-bcrypt>=4.2.0
+bcrypt==4.0.1
 
 # Monitoring
 psutil>=6.1.0
