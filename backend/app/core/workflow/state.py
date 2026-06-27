@@ -13,7 +13,7 @@ class MemoryItem(TypedDict):
     created_at: str
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """工作流执行状态 — 在工作流各节点间流转的数据载体"""
     messages: Annotated[List[BaseMessage], add_messages]  # 对话消息历史（LangGraph 自动合并）
     workflow_id: str
@@ -29,3 +29,4 @@ class AgentState(TypedDict):
     collected_memories: List[MemoryItem]                   # 需要存储的新记忆
     pending_tool_calls: Optional[List[Dict]]               # 待执行的工具调用
     error: Optional[str]                                   # 执行错误信息
+    _last_token_usage: Optional[Dict[str, Any]]            # 上一步 Agent 调用的 token 用量

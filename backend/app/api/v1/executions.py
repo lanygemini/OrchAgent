@@ -21,7 +21,7 @@ _streamer: Optional[ExecutionStreamer] = None
 def _get_engine() -> ExecutionEngine:
     global _engine
     if _engine is None:
-        _engine = ExecutionEngine(db=None)
+        _engine = ExecutionEngine(db=None, streamer=_get_streamer())
     return _engine
 
 
@@ -159,7 +159,7 @@ async def stream_execution(execution_id: str, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{execution_id}/steps")
-async def list_execution_steps(execution_id: str, db: AsyncSession = Depends(get_db)):
+async def list_execution_steps(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """获取执行步骤列表"""
     result = await db.execute(
         select(ExecutionStep).where(ExecutionStep.execution_id == execution_id).order_by(ExecutionStep.started_at)

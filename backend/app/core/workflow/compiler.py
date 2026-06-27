@@ -1,6 +1,7 @@
 """工作流编译器：将 DAG 定义编译为可执行的 LangGraph StateGraph"""
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Awaitable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -10,6 +11,24 @@ from app.core.agent.agent_manager import AgentManager, AgentRuntime
 from app.core.tool.registry import tool_registry
 from app.core.memory.episodic import EpisodicMemoryStore
 from app.core.memory.extractor import MemoryExtractor
+
+
+@dataclass
+class StepRecord:
+    """节点执行步骤记录"""
+    node_id: str
+    node_label: str
+    node_type: str
+    status: str = "running"
+    input_data: Optional[Dict[str, Any]] = None
+    output_data: Optional[Dict[str, Any]] = None
+    token_usage: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+StepCallback = Callable[[StepRecord], Awaitable[None]]
 
 
 @dataclass
@@ -77,8 +96,8 @@ class WorkflowCompiler:
 
         return errors
 
-    def compile(self, dag: DAGDefinition) -> StateGraph:
-        """将 DAG 编译为 LangGraph StateGraph"""
+    def compile(self, dag: DAGDefinition, step_callback: Optional[StepCallback] = None) -> StateGraph:
+        """将 DAG 编译为 LangGraph StateGraph，step_callback 在每个节点执行后触发"""
         errors = self.validate(dag)
         if errors:
             raise ValidationError("；".join(errors))
@@ -87,8 +106,10 @@ class WorkflowCompiler:
 
         graph.set_entry_point(dag.start_node_id)
 
+        node_map: Dict[str, DAGNode] = {n.id: n for n in dag.nodes}
+
         for node in dag.nodes:
-            handler = self._get_node_handler(node)
+            handler = self._get_node_handler(node, step_callback)
             graph.add_node(node.id, handler)
 
         # 按源节点分组边
@@ -137,29 +158,63 @@ class WorkflowCompiler:
 
         return graph
 
-    def _get_node_handler(self, node: DAGNode) -> Callable:
-        """根据节点类型返回对应的处理函数（闭包绑定节点配置）"""
+    def _get_node_handler(self, node: DAGNode, step_callback: Optional[StepCallback] = None) -> Callable:
+        """根据节点类型返回对应的处理函数（闭包绑定节点配置），并用 step_callback 记录步骤"""
         async def handler(state: AgentState) -> AgentState:
             state["current_node"] = node.id
+            step = StepRecord(
+                node_id=node.id,
+                node_label=node.label or node.type,
+                node_type=node.type,
+                status="running",
+                input_data=dict(state.get("context", {})),
+                started_at=datetime.now(timezone.utc),
+            )
 
-            if node.type == "agent":
-                return await self._handle_agent_node(state, node.agent_id)
-            elif node.type == "tool":
-                return await self._handle_tool_node(state, node.tool_id)
-            elif node.type == "condition":
-                return await self._handle_condition_node(state)
-            elif node.type == "start":
-                return await self._handle_start_node(state)
-            elif node.type == "end":
-                return await self._handle_end_node(state)
-            elif node.type == "fork":
-                return await self._handle_fork_node(state)
-            elif node.type == "join":
-                return await self._handle_join_node(state)
-            elif node.type == "human":
-                return await self._handle_human_node(state)
-            else:
-                return await self._handle_noop(state)
+            try:
+                if node.type == "agent":
+                    state = await self._handle_agent_node(state, node.agent_id)
+                elif node.type == "tool":
+                    state = await self._handle_tool_node(state, node.tool_id)
+                elif node.type == "condition":
+                    state = await self._handle_condition_node(state)
+                elif node.type == "start":
+                    state = await self._handle_start_node(state)
+                elif node.type == "end":
+                    state = await self._handle_end_node(state)
+                elif node.type == "fork":
+                    state = await self._handle_fork_node(state)
+                elif node.type == "join":
+                    state = await self._handle_join_node(state)
+                elif node.type == "human":
+                    state = await self._handle_human_node(state)
+                else:
+                    state = await self._handle_noop(state)
+
+                state_err = state.get("error")
+                if state_err:
+                    step.status = "failed"
+                    step.error_message = state_err
+                else:
+                    step.status = "completed"
+
+                step.output_data = {
+                    "tool_results": {k: str(v)[:500] for k, v in state.get("tool_results", {}).items()},
+                }
+                if node.type == "agent":
+                    step.token_usage = dict(state.get("_last_token_usage") or {})
+                    state["_last_token_usage"] = None
+
+            except Exception as e:
+                step.status = "failed"
+                step.error_message = str(e)
+
+            step.completed_at = datetime.now(timezone.utc)
+
+            if step_callback:
+                await step_callback(step)
+
+            return state
         return handler
 
     async def _handle_start_node(self, state: AgentState) -> AgentState:
@@ -193,7 +248,10 @@ class WorkflowCompiler:
             user_input = state["messages"][-1].content if hasattr(state["messages"][-1], 'content') else str(state["messages"][-1])
         try:
             response = runtime.invoke(user_input)
+            from langchain_core.messages import AIMessage
+            state["messages"].append(AIMessage(content=response.content))
             state["tool_results"][agent_id] = response.content
+            state["_last_token_usage"] = response.token_usage
         except Exception as e:
             state["error"] = f"Agent 调用失败: {str(e)}"
         return state

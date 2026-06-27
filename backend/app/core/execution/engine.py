@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph
 
-from app.core.workflow.compiler import WorkflowCompiler, DAGDefinition, DAGNode, DAGEdge
+from app.core.workflow.compiler import WorkflowCompiler, DAGDefinition, DAGNode, DAGEdge, StepRecord
 from app.core.workflow.state import AgentState
 from app.core.execution.streamer import ExecutionStreamer
 from app.core.execution.error_handler import RetryHandler, CircuitBreaker
@@ -85,6 +85,40 @@ class ExecutionEngine:
     async def _run_execution(self, ctx: ExecutionContext, execution: WorkflowExecution):
         """内部执行逻辑：构建 DAG → 编译 LangGraph → 执行 → 结果回写"""
         async with async_session_factory() as bg_db:
+            step_records: List[StepRecord] = []
+
+            async def record_step(step: StepRecord):
+                """回调：将 StepRecord 写入 ExecutionStep 表，并推送 SSE 事件"""
+                step_records.append(step)
+                exec_step = ExecutionStep(
+                    execution_id=ctx.execution_id,
+                    node_id=step.node_id,
+                    node_label=step.node_label,
+                    step_type=step.node_type,
+                    input_data=step.input_data,
+                    output_data=step.output_data,
+                    status=step.status,
+                    token_usage=step.token_usage or {},
+                    error_message=step.error_message,
+                    started_at=step.started_at,
+                    completed_at=step.completed_at,
+                )
+                bg_db.add(exec_step)
+                await bg_db.flush()
+
+                await self.streamer.publish(ctx.execution_id, "step.completed", {
+                    "execution_id": ctx.execution_id,
+                    "node_id": step.node_id,
+                    "node_label": step.node_label,
+                    "node_type": step.node_type,
+                    "status": step.status,
+                    "token_usage": step.token_usage or {},
+                    "output_data": step.output_data or {},
+                    "error_message": step.error_message,
+                    "started_at": step.started_at.isoformat() if step.started_at else None,
+                    "completed_at": step.completed_at.isoformat() if step.completed_at else None,
+                })
+
             try:
                 await bg_db.execute(
                     update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="running")
@@ -99,7 +133,7 @@ class ExecutionEngine:
 
                 dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
                 await self._preload_agents(bg_db, dag)
-                graph = self.compiler.compile(dag)
+                graph = self.compiler.compile(dag, step_callback=record_step)
 
                 initial_state: AgentState = {
                     "messages": [],
@@ -121,10 +155,28 @@ class ExecutionEngine:
                 app = graph.compile()
                 result = await app.ainvoke(initial_state)
 
+                total_tokens = sum(
+                    (s.token_usage or {}).get("total_tokens", 0) for s in step_records
+                )
+                prompt_tokens = sum(
+                    (s.token_usage or {}).get("prompt_tokens", 0) for s in step_records
+                )
+                completion_tokens = sum(
+                    (s.token_usage or {}).get("completion_tokens", 0) for s in step_records
+                )
+
                 await bg_db.execute(
                     update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
                         status="completed",
-                        output_data={"output": str(result.get("tool_results", {})), "path": result.get("path", [])},
+                        output_data={
+                            "output": {k: str(v) for k, v in result.get("tool_results", {}).items()},
+                            "path": result.get("path", []),
+                        },
+                        token_usage={
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        },
                         completed_at=datetime.now(timezone.utc),
                     )
                 )
@@ -151,6 +203,7 @@ class ExecutionEngine:
                 })
 
             finally:
+                await self.streamer.publish_end(ctx.execution_id)
                 self._active_tasks.pop(ctx.execution_id, None)
 
     async def _build_dag_from_workflow(self, db: AsyncSession, workflow_id: str) -> DAGDefinition:

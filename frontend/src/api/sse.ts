@@ -1,6 +1,6 @@
 type SSEEventCallback = {
   onExecutionStarted?: (data: any) => void;
-  onStepStarted?: (data: any) => void;
+  onStepCompleted?: (data: any) => void;
   onLLMThinking?: (data: any) => void;
   onLLMComplete?: (data: any) => void;
   onToolCall?: (data: any) => void;
@@ -15,7 +15,7 @@ type SSEEventCallback = {
 
 const EVENT_MAP: Record<string, keyof SSEEventCallback> = {
   'execution.started': 'onExecutionStarted',
-  'step.started': 'onStepStarted',
+  'step.completed': 'onStepCompleted',
   'llm.thinking': 'onLLMThinking',
   'llm.complete': 'onLLMComplete',
   'tool.call': 'onToolCall',
@@ -58,6 +58,7 @@ export function subscribeExecution(
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let currentEvent = '';
 
       while (!aborted) {
         const { done, value } = await reader.read();
@@ -68,19 +69,27 @@ export function subscribeExecution(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('event: ')) {
+            currentEvent = trimmed.slice(7).trim();
+          } else if (trimmed.startsWith('data: ')) {
+            const dataStr = trimmed.slice(6).trim();
+            if (!dataStr) continue;
             try {
-              const raw = JSON.parse(line.slice(6));
-              console.log('[SSE]', raw);
+              const data = JSON.parse(dataStr);
+              const eventType = currentEvent || data.event || '';
+              const callbackKey = EVENT_MAP[eventType];
+              if (callbackKey && callbacks[callbackKey]) {
+                (callbacks[callbackKey] as any)(data);
+              }
             } catch {
-              console.log('[SSE] raw:', line.slice(6));
+              // skip unparseable data
             }
-          } else if (line.startsWith('event: ')) {
-            const eventType = line.slice(7).trim();
-            buffer = eventType + '\n' + (buffer || '');
+            currentEvent = '';
           }
         }
       }
+      reader.releaseLock();
     } catch (e: any) {
       if (!aborted && callbacks.onError) {
         callbacks.onError(e);
