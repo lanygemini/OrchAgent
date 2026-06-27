@@ -90,22 +90,22 @@ class ExecutionEngine:
             async def record_step(step: StepRecord):
                 """回调：将 StepRecord 写入 ExecutionStep 表，并推送 SSE 事件"""
                 step_records.append(step)
-                exec_step = ExecutionStep(
-                    execution_id=ctx.execution_id,
-                    node_id=step.node_id,
-                    node_label=step.node_label,
-                    step_type=step.node_type,
-                    input_data=step.input_data,
-                    output_data=step.output_data,
-                    status=step.status,
-                    token_usage=step.token_usage or {},
-                    error_message=step.error_message,
-                    started_at=step.started_at,
-                    completed_at=step.completed_at,
-                )
-                bg_db.add(exec_step)
-                await bg_db.flush()
-
+                async with async_session_factory() as step_db:
+                    exec_step = ExecutionStep(
+                        execution_id=ctx.execution_id,
+                        node_id=step.node_id,
+                        node_label=step.node_label,
+                        step_type=step.node_type,
+                        input_data=step.input_data,
+                        output_data=step.output_data,
+                        status=step.status,
+                        token_usage=step.token_usage or {},
+                        error_message=step.error_message,
+                        started_at=step.started_at,
+                        completed_at=step.completed_at,
+                    )
+                    step_db.add(exec_step)
+                    await step_db.commit()
                 await self.streamer.publish(ctx.execution_id, "step.completed", {
                     "execution_id": ctx.execution_id,
                     "node_id": step.node_id,
@@ -133,6 +133,7 @@ class ExecutionEngine:
 
                 dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
                 await self._preload_agents(bg_db, dag)
+                await self._preload_tools(bg_db, dag)
                 graph = self.compiler.compile(dag, step_callback=record_step)
 
                 initial_state: AgentState = {
@@ -261,6 +262,45 @@ class ExecutionEngine:
             agent_model = result.scalar_one_or_none()
             if agent_model:
                 self.compiler.agent_manager.create_runtime(agent_model)
+
+    async def _preload_tools(self, db: AsyncSession, dag: DAGDefinition):
+        from app.core.tool.builtin import ensure_builtin_tools
+        from app.core.tool.registry import tool_registry
+        from app.core.tool.base import BuiltinTool, CustomTool
+        from app.models.tool import Tool as ToolModel
+        from app.core.tool.builtin.calculator import CalculatorTool
+        from app.core.tool.builtin.datetime_tool import DateTimeTool
+
+        ensure_builtin_tools()
+
+        tool_ids = {n.tool_id for n in dag.nodes if n.tool_id}
+        for tid in tool_ids:
+            if tool_registry.get(tid):
+                continue
+            result = await db.execute(select(ToolModel).where(ToolModel.id == tid))
+            tool_model = result.scalar_one_or_none()
+            if not tool_model:
+                continue
+            if tool_model.type == "builtin":
+                name = tool_model.name.lower()
+                if name == "calculator":
+                    t = CalculatorTool()
+                elif name == "datetime":
+                    t = DateTimeTool()
+                else:
+                    from app.core.tool.base import BaseTool
+                    t = BaseTool(name=tool_model.name, description=tool_model.description)
+                t.tool_id = tid
+                tool_registry.register(t)
+            elif tool_model.type == "custom":
+                t = CustomTool(
+                    name=tool_model.name,
+                    description=tool_model.description,
+                    source_code=tool_model.config.get("source_code", ""),
+                    sandbox_config=tool_model.config.get("sandbox_config", {}),
+                    tool_id=tid,
+                )
+                tool_registry.register(t)
 
     async def pause(self, execution_id: str):
         """暂停执行（取消当前任务并标记状态）"""

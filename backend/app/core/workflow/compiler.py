@@ -161,7 +161,6 @@ class WorkflowCompiler:
     def _get_node_handler(self, node: DAGNode, step_callback: Optional[StepCallback] = None) -> Callable:
         """根据节点类型返回对应的处理函数（闭包绑定节点配置），并用 step_callback 记录步骤"""
         async def handler(state: AgentState) -> AgentState:
-            state["current_node"] = node.id
             step = StepRecord(
                 node_id=node.id,
                 node_label=node.label or node.type,
@@ -171,120 +170,117 @@ class WorkflowCompiler:
                 started_at=datetime.now(timezone.utc),
             )
 
+            changes: Dict[str, Any] = {"current_node": node.id, "path": [node.id]}
+
             try:
                 if node.type == "agent":
-                    state = await self._handle_agent_node(state, node.agent_id)
+                    await self._handle_agent_node(state, changes, node.agent_id)
                 elif node.type == "tool":
-                    state = await self._handle_tool_node(state, node.tool_id)
+                    await self._handle_tool_node(state, changes, node.tool_id, node.config)
                 elif node.type == "condition":
-                    state = await self._handle_condition_node(state)
+                    await self._handle_condition_node(state, changes)
                 elif node.type == "start":
-                    state = await self._handle_start_node(state)
+                    await self._handle_start_node(state, changes)
                 elif node.type == "end":
-                    state = await self._handle_end_node(state)
+                    await self._handle_end_node(state, changes)
                 elif node.type == "fork":
-                    state = await self._handle_fork_node(state)
+                    await self._handle_fork_node(state, changes)
                 elif node.type == "join":
-                    state = await self._handle_join_node(state)
+                    await self._handle_join_node(state, changes)
                 elif node.type == "human":
-                    state = await self._handle_human_node(state)
+                    await self._handle_human_node(state, changes)
                 else:
-                    state = await self._handle_noop(state)
+                    await self._handle_noop(state, changes)
 
-                state_err = state.get("error")
+                state_err = state.get("error") or changes.get("error")
                 if state_err:
                     step.status = "failed"
                     step.error_message = state_err
                 else:
                     step.status = "completed"
 
+                # merge changes back to state for step recording
+                state.update(changes)
                 step.output_data = {
                     "tool_results": {k: str(v)[:500] for k, v in state.get("tool_results", {}).items()},
                 }
                 if node.type == "agent":
-                    step.token_usage = dict(state.get("_last_token_usage") or {})
-                    state["_last_token_usage"] = None
-
+                    step.token_usage = dict(changes.get("_last_token_usage") or {})
             except Exception as e:
                 step.status = "failed"
                 step.error_message = str(e)
+                changes["error"] = str(e)
 
             step.completed_at = datetime.now(timezone.utc)
 
             if step_callback:
                 await step_callback(step)
 
-            return state
+            return changes
         return handler
 
-    async def _handle_start_node(self, state: AgentState) -> AgentState:
+    async def _handle_start_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """起始节点：透传状态"""
-        state["path"] = state.get("path", []) + [state.get("current_node", "start")]
-        return state
+        pass
 
-    async def _handle_end_node(self, state: AgentState) -> AgentState:
+    async def _handle_end_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """结束节点：透传状态"""
-        state["path"] = state.get("path", []) + [state.get("current_node", "end")]
-        return state
+        pass
 
-    async def _handle_noop(self, state: AgentState) -> AgentState:
+    async def _handle_noop(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """空操作节点"""
-        state["path"] = state.get("path", []) + [state.get("current_node", "noop")]
-        return state
+        pass
 
-    async def _handle_agent_node(self, state: AgentState, agent_id: Optional[str]) -> AgentState:
+    async def _handle_agent_node(self, state: AgentState, changes: Dict[str, Any], agent_id: Optional[str]) -> None:
         """Agent 节点：调用 AgentRuntime 进行处理"""
-        state["path"] = state.get("path", []) + [state.get("current_node", "agent")]
         if not agent_id:
-            state["error"] = "Agent 节点未配置 agent_id"
-            return state
+            changes["error"] = "Agent 节点未配置 agent_id"
+            return
         runtime = self.agent_manager.get_runtime(agent_id)
         if not runtime:
-            state["error"] = f"Agent 运行时未找到，node_id: {state.get('current_node', '')}, agent_id: {agent_id}"
-            return state
+            changes["error"] = f"Agent 运行时未找到，agent_id: {agent_id}"
+            return
 
-        user_input = state["context"].get("user_input", "")
-        if state["messages"]:
+        user_input = state.get("context", {}).get("user_input", "")
+        if state.get("messages"):
             user_input = state["messages"][-1].content if hasattr(state["messages"][-1], 'content') else str(state["messages"][-1])
         try:
             response = runtime.invoke(user_input)
             from langchain_core.messages import AIMessage
-            state["messages"].append(AIMessage(content=response.content))
-            state["tool_results"][agent_id] = response.content
-            state["_last_token_usage"] = response.token_usage
+            changes["messages"] = [AIMessage(content=response.content)]
+            changes["tool_results"] = {agent_id: response.content}
+            changes["_last_token_usage"] = response.token_usage
         except Exception as e:
-            state["error"] = f"Agent 调用失败: {str(e)}"
-        return state
+            changes["error"] = f"Agent 调用失败: {str(e)}"
 
-    async def _handle_tool_node(self, state: AgentState, tool_id: Optional[str]) -> AgentState:
-        """工具节点：调用注册的工具执行"""
+    async def _handle_tool_node(self, state: AgentState, changes: Dict[str, Any], tool_id: Optional[str], config: Dict[str, Any]) -> None:
+        """工具节点：调用注册的工具执行，config 中的参数优先于 context"""
         if not tool_id:
-            state["error"] = "工具节点未配置 tool_id"
-            return state
+            changes["error"] = "工具节点未配置 tool_id"
+            return
         tool = tool_registry.get(tool_id)
         if not tool:
-            state["error"] = f"工具未找到: {tool_id}"
-            return state
+            changes["error"] = f"工具未找到: {tool_id}"
+            return
         try:
-            result = await tool._arun(**state.get("context", {}))
-            state["tool_results"][tool_id] = result
+            kwargs = dict(config) if config else {}
+            result = await tool._arun(**kwargs)
+            changes["tool_results"] = {tool_id: result}
         except Exception as e:
-            state["error"] = f"工具调用失败: {str(e)}"
-        return state
+            changes["error"] = f"工具调用失败: {str(e)}"
 
-    async def _handle_condition_node(self, state: AgentState) -> AgentState:
+    async def _handle_condition_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """条件节点：占位，由边上的条件表达式处理"""
-        return state
+        pass
 
-    async def _handle_fork_node(self, state: AgentState) -> AgentState:
+    async def _handle_fork_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """分支节点：占位"""
-        return state
+        pass
 
-    async def _handle_join_node(self, state: AgentState) -> AgentState:
+    async def _handle_join_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """汇合节点：占位"""
-        return state
+        pass
 
-    async def _handle_human_node(self, state: AgentState) -> AgentState:
+    async def _handle_human_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
         """人工节点：标记需要人工输入"""
-        state["needs_human_input"] = True
-        return state
+        changes["needs_human_input"] = True
