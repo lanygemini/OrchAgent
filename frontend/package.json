@@ -11,7 +11,7 @@
   "dependencies": {
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "reactflow": "^12.0.0",
+    "@xyflow/react": "^12.0.0",
     "zustand": "^5.0.0",
     "axios": "^1.7.0",
     "recharts": "^2.15.0"
