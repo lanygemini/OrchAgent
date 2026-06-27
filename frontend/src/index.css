@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.react-flow__node-agent {
+  @apply bg-blue-500 text-white rounded-lg px-4 py-2 shadow-md;
+}
+
+.react-flow__node-tool {
+  @apply bg-green-500 text-white rounded-lg px-4 py-2 shadow-md;
+}
+
+.react-flow__node-condition {
+  @apply bg-yellow-400 text-black px-4 py-2 shadow-md;
+  transform: rotate(45deg);
+}
+
+.react-flow__node-condition > div {
+  transform: rotate(-45deg);
+}
+
+.react-flow__node-human {
+  @apply bg-orange-500 text-white rounded-lg px-4 py-2 shadow-md;
+}
