@@ -2,14 +2,14 @@
 from typing import Any, Optional, Dict
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.callbacks.base import BaseCallbackHandler
 
 from app.config import settings
 
 
 LLM_PROVIDER_MAP: Dict[str, tuple] = {
     "openai": ("langchain_openai", "ChatOpenAI"),
-    "deepseek": ("langchain_community.chat_models", "ChatDeepSeek"),
+    "deepseek": ("langchain_deepseek", "ChatDeepSeek"),
     "qwen": ("langchain_community.chat_models", "ChatTongyi"),
     "zhipu": ("langchain_community.chat_models", "ChatZhipuAI"),
 }

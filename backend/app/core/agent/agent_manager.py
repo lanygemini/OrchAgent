@@ -60,15 +60,16 @@ class AgentRuntime:
 
         self.usage_callback.reset()
 
-        llm_with_callbacks = self.llm
+        callbacks = [self.usage_callback]
+        invoke_kwargs: Dict[str, Any] = {}
         if hasattr(self.llm, "callbacks"):
-            llm_with_callbacks = self.llm.bind(callbacks=[self.usage_callback])
+            invoke_kwargs["config"] = {"callbacks": callbacks}
 
         if self.tools:
-            llm_with_tools = llm_with_callbacks.bind_tools(self.tools)
-            result = llm_with_tools.invoke(messages)
+            llm_with_tools = self.llm.bind_tools(self.tools)
+            result = llm_with_tools.invoke(messages, **invoke_kwargs)
         else:
-            result = llm_with_callbacks.invoke(messages)
+            result = self.llm.invoke(messages, **invoke_kwargs)
 
         return AgentResponse(
             content=result.content if hasattr(result, "content") else str(result),

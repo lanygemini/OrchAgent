@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph
 
@@ -15,6 +15,7 @@ from app.core.execution.error_handler import RetryHandler, CircuitBreaker
 from app.core.execution.cost_control import BudgetController, CostCalculator
 from app.models.execution import WorkflowExecution, ExecutionStep
 from app.models.workflow import Workflow
+from app.db.session import async_session_factory
 
 
 @dataclass
@@ -83,66 +84,79 @@ class ExecutionEngine:
 
     async def _run_execution(self, ctx: ExecutionContext, execution: WorkflowExecution):
         """内部执行逻辑：构建 DAG → 编译 LangGraph → 执行 → 结果回写"""
-        try:
-            execution.status = "running"
-            await self.db.flush()
+        async with async_session_factory() as bg_db:
+            try:
+                await bg_db.execute(
+                    update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="running")
+                )
+                await bg_db.commit()
 
-            await self.streamer.publish(ctx.execution_id, "execution.started", {
-                "execution_id": ctx.execution_id,
-                "workflow_id": ctx.workflow_id,
-                "workflow_name": ctx.workflow_name,
-            })
+                await self.streamer.publish(ctx.execution_id, "execution.started", {
+                    "execution_id": ctx.execution_id,
+                    "workflow_id": ctx.workflow_id,
+                    "workflow_name": ctx.workflow_name,
+                })
 
-            dag = await self._build_dag_from_workflow(execution.workflow_id)
-            graph = self.compiler.compile(dag)
+                dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
+                await self._preload_agents(bg_db, dag)
+                graph = self.compiler.compile(dag)
 
-            initial_state: AgentState = {
-                "messages": [],
-                "workflow_id": ctx.workflow_id,
-                "execution_id": ctx.execution_id,
-                "context": {"user_input": ctx.input_text, **ctx.variables},
-                "current_node": dag.start_node_id,
-                "next_nodes": [],
-                "path": [],
-                "tool_results": {},
-                "needs_human_input": False,
-                "human_input": None,
-                "retrieved_memories": [],
-                "collected_memories": [],
-                "pending_tool_calls": None,
-                "error": None,
-            }
+                initial_state: AgentState = {
+                    "messages": [],
+                    "workflow_id": ctx.workflow_id,
+                    "execution_id": ctx.execution_id,
+                    "context": {"user_input": ctx.input_text, **ctx.variables},
+                    "current_node": dag.start_node_id,
+                    "next_nodes": [],
+                    "path": [],
+                    "tool_results": {},
+                    "needs_human_input": False,
+                    "human_input": None,
+                    "retrieved_memories": [],
+                    "collected_memories": [],
+                    "pending_tool_calls": None,
+                    "error": None,
+                }
 
-            app = graph.compile()
-            result = await app.ainvoke(initial_state)
+                app = graph.compile()
+                result = await app.ainvoke(initial_state)
 
-            execution.status = "completed"
-            execution.output_data = {"output": str(result.get("tool_results", {})), "path": result.get("path", [])}
-            execution.completed_at = datetime.now(timezone.utc)
+                await bg_db.execute(
+                    update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
+                        status="completed",
+                        output_data={"output": str(result.get("tool_results", {})), "path": result.get("path", [])},
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await bg_db.commit()
 
-            await self.streamer.publish(ctx.execution_id, "execution.completed", {
-                "execution_id": ctx.execution_id,
-                "status": "completed",
-            })
+                await self.streamer.publish(ctx.execution_id, "execution.completed", {
+                    "execution_id": ctx.execution_id,
+                    "status": "completed",
+                })
 
-        except Exception as e:
-            execution.status = "failed"
-            execution.error_message = str(e)
-            execution.completed_at = datetime.now(timezone.utc)
+            except Exception as e:
+                await bg_db.execute(
+                    update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
+                        status="failed",
+                        error_message=str(e),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await bg_db.commit()
 
-            await self.streamer.publish(ctx.execution_id, "execution.failed", {
-                "execution_id": ctx.execution_id,
-                "error": str(e),
-            })
+                await self.streamer.publish(ctx.execution_id, "execution.failed", {
+                    "execution_id": ctx.execution_id,
+                    "error": str(e),
+                })
 
-        finally:
-            await self.db.flush()
-            self._active_tasks.pop(ctx.execution_id, None)
+            finally:
+                self._active_tasks.pop(ctx.execution_id, None)
 
-    async def _build_dag_from_workflow(self, workflow_id: str) -> DAGDefinition:
+    async def _build_dag_from_workflow(self, db: AsyncSession, workflow_id: str) -> DAGDefinition:
         from app.models.workflow import Workflow as WF
 
-        result = await self.db.execute(select(WF).where(WF.id == workflow_id))
+        result = await db.execute(select(WF).where(WF.id == workflow_id))
         wf = result.scalar_one_or_none()
         if not wf:
             return DAGDefinition(nodes=[], edges=[], start_node_id="")
@@ -182,6 +196,18 @@ class ExecutionEngine:
             start_id = next((n.id for n in wf.nodes if n.label == start_id or getattr(n, "client_id", None) == start_id), start_id)
 
         return DAGDefinition(nodes=nodes, edges=edges, start_node_id=start_id)
+
+    async def _preload_agents(self, db: AsyncSession, dag: DAGDefinition):
+        from app.models.agent import Agent as AgentModel
+
+        agent_ids = {n.agent_id for n in dag.nodes if n.agent_id}
+        for aid in agent_ids:
+            if self.compiler.agent_manager.get_runtime(aid):
+                continue
+            result = await db.execute(select(AgentModel).where(AgentModel.id == aid))
+            agent_model = result.scalar_one_or_none()
+            if agent_model:
+                self.compiler.agent_manager.create_runtime(agent_model)
 
     async def pause(self, execution_id: str):
         """暂停执行（取消当前任务并标记状态）"""

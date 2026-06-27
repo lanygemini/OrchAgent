@@ -138,53 +138,80 @@ class WorkflowCompiler:
         return graph
 
     def _get_node_handler(self, node: DAGNode) -> Callable:
-        """根据节点类型返回对应的处理函数"""
-        handlers = {
-            "agent": self._handle_agent_node,
-            "tool": self._handle_tool_node,
-            "condition": self._handle_condition_node,
-            "start": self._handle_start_node,
-            "end": self._handle_end_node,
-            "fork": self._handle_fork_node,
-            "join": self._handle_join_node,
-            "human": self._handle_human_node,
-        }
-        return handlers.get(node.type, self._handle_noop)
+        """根据节点类型返回对应的处理函数（闭包绑定节点配置）"""
+        async def handler(state: AgentState) -> AgentState:
+            state["current_node"] = node.id
+
+            if node.type == "agent":
+                return await self._handle_agent_node(state, node.agent_id)
+            elif node.type == "tool":
+                return await self._handle_tool_node(state, node.tool_id)
+            elif node.type == "condition":
+                return await self._handle_condition_node(state)
+            elif node.type == "start":
+                return await self._handle_start_node(state)
+            elif node.type == "end":
+                return await self._handle_end_node(state)
+            elif node.type == "fork":
+                return await self._handle_fork_node(state)
+            elif node.type == "join":
+                return await self._handle_join_node(state)
+            elif node.type == "human":
+                return await self._handle_human_node(state)
+            else:
+                return await self._handle_noop(state)
+        return handler
 
     async def _handle_start_node(self, state: AgentState) -> AgentState:
         """起始节点：透传状态"""
+        state["path"] = state.get("path", []) + [state.get("current_node", "start")]
         return state
 
     async def _handle_end_node(self, state: AgentState) -> AgentState:
         """结束节点：透传状态"""
+        state["path"] = state.get("path", []) + [state.get("current_node", "end")]
         return state
 
     async def _handle_noop(self, state: AgentState) -> AgentState:
         """空操作节点"""
+        state["path"] = state.get("path", []) + [state.get("current_node", "noop")]
         return state
 
-    async def _handle_agent_node(self, state: AgentState) -> AgentState:
+    async def _handle_agent_node(self, state: AgentState, agent_id: Optional[str]) -> AgentState:
         """Agent 节点：调用 AgentRuntime 进行处理"""
-        agent_id = state.get("current_node", "")
+        state["path"] = state.get("path", []) + [state.get("current_node", "agent")]
+        if not agent_id:
+            state["error"] = "Agent 节点未配置 agent_id"
+            return state
         runtime = self.agent_manager.get_runtime(agent_id)
         if not runtime:
-            state["error"] = f"Agent runtime not found for node: {agent_id}"
+            state["error"] = f"Agent 运行时未找到，node_id: {state.get('current_node', '')}, agent_id: {agent_id}"
             return state
 
-        user_input = state["messages"][-1].content if state["messages"] else ""
-        response = runtime.invoke(user_input)
-        state["tool_results"][agent_id] = response.content
+        user_input = state["context"].get("user_input", "")
+        if state["messages"]:
+            user_input = state["messages"][-1].content if hasattr(state["messages"][-1], 'content') else str(state["messages"][-1])
+        try:
+            response = runtime.invoke(user_input)
+            state["tool_results"][agent_id] = response.content
+        except Exception as e:
+            state["error"] = f"Agent 调用失败: {str(e)}"
         return state
 
-    async def _handle_tool_node(self, state: AgentState) -> AgentState:
+    async def _handle_tool_node(self, state: AgentState, tool_id: Optional[str]) -> AgentState:
         """工具节点：调用注册的工具执行"""
-        tool_id = state.get("current_node", "")
+        if not tool_id:
+            state["error"] = "工具节点未配置 tool_id"
+            return state
         tool = tool_registry.get(tool_id)
         if not tool:
-            state["error"] = f"Tool not found: {tool_id}"
+            state["error"] = f"工具未找到: {tool_id}"
             return state
-        result = await tool._arun(**state.get("context", {}))
-        state["tool_results"][tool_id] = result
+        try:
+            result = await tool._arun(**state.get("context", {}))
+            state["tool_results"][tool_id] = result
+        except Exception as e:
+            state["error"] = f"工具调用失败: {str(e)}"
         return state
 
     async def _handle_condition_node(self, state: AgentState) -> AgentState:
