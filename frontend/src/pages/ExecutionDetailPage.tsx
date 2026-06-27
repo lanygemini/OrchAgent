@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { executionApi } from '../api/client'
 import { subscribeExecution } from '../api/sse'
-import { Button, Card, Badge, Spinner } from '../components/ui'
+import { Button, Card, Spinner } from '../components/ui'
 import type { Execution, ExecutionStep } from '../types'
 
 const statusLabels: Record<string, string> = {
@@ -24,11 +24,13 @@ const statusColors: Record<string, string> = {
 export default function ExecutionDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [execution, setExecution] = useState<Execution | null>(null)
+  const location = useLocation()
+  const initial = (location.state as Execution | null) || null
+  const [execution, setExecution] = useState<Execution | null>(initial)
   const [steps, setSteps] = useState<ExecutionStep[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [liveSteps, setLiveSteps] = useState<Record<string, ExecutionStep>>({})
+  const [firstFetchDone, setFirstFetchDone] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval>>()
 
   const fetchData = useCallback(async () => {
@@ -46,19 +48,18 @@ export default function ExecutionDetailPage() {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = undefined }
       }
     } catch (e: any) {
-      const msg = e?.response?.data?.detail || e?.message || '加载执行记录失败'
+      const msg = e?.response?.data?.detail || e?.message || '加载失败'
       setError(msg)
       if (e?.response?.status === 404) {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = undefined }
       }
     } finally {
-      setLoading(false)
+      setFirstFetchDone(true)
     }
   }, [id])
 
   useEffect(() => {
     if (!id) return
-    setLoading(true)
     setError(null)
     setLiveSteps({})
 
@@ -111,19 +112,19 @@ export default function ExecutionDetailPage() {
       )
     : steps
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Spinner />
-      </div>
-    )
-  }
-
   if (error) {
     return (
       <div className="text-center py-20">
         <p className="text-red-500 mb-4">{error}</p>
         <Button variant="ghost" onClick={() => navigate('/executions')}>← 返回执行列表</Button>
+      </div>
+    )
+  }
+
+  if (!execution && !firstFetchDone) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Spinner />
       </div>
     )
   }
@@ -137,13 +138,12 @@ export default function ExecutionDetailPage() {
     )
   }
 
+  const status = execution.status || 'pending'
+  const userQuestion = execution.input_data?.input_text || ''
   const outputEntries: [string, string][] = []
-  if (execution.output_data?.output) {
-    const out = execution.output_data.output
-    if (typeof out === 'object') {
-      for (const [key, value] of Object.entries(out)) {
-        outputEntries.push([key, String(value)])
-      }
+  if (execution.output_data?.output && typeof execution.output_data.output === 'object') {
+    for (const [key, value] of Object.entries(execution.output_data.output)) {
+      outputEntries.push([key, String(value)])
     }
   }
 
@@ -157,9 +157,9 @@ export default function ExecutionDetailPage() {
           </h2>
         </div>
         <div className="flex gap-2">
-          {execution.status === 'running' && <Button variant="secondary">暂停</Button>}
-          {execution.status === 'paused' && <Button variant="primary">继续</Button>}
-          {execution.status === 'running' && <Button variant="danger">取消</Button>}
+          {status === 'running' && <Button variant="secondary">暂停</Button>}
+          {status === 'paused' && <Button variant="primary">继续</Button>}
+          {status === 'running' && <Button variant="danger">取消</Button>}
         </div>
       </div>
 
@@ -167,14 +167,17 @@ export default function ExecutionDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">状态</p>
-            <span className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[execution.status] || ''}`}>
-              {statusLabels[execution.status] || execution.status}
+            <span className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[status] || ''}`}>
+              {statusLabels[status] || status}
+              {status === 'running' && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
             </span>
           </div>
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">Token 消耗</p>
             <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {execution.token_usage?.total_tokens?.toLocaleString() || '-'}
+              {execution.token_usage?.total_tokens != null
+                ? execution.token_usage.total_tokens.toLocaleString()
+                : '-'}
             </p>
           </div>
           <div>
@@ -192,7 +195,25 @@ export default function ExecutionDetailPage() {
         </div>
       </Card>
 
-      {execution.status === 'completed' && outputEntries.length > 0 && (
+      {userQuestion && (
+        <Card>
+          <h3 className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">用户提问</h3>
+          <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
+            <p className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">{userQuestion}</p>
+          </div>
+        </Card>
+      )}
+
+      {status === 'failed' && execution.error_message && (
+        <Card>
+          <h3 className="mb-2 text-sm font-semibold text-red-500 uppercase tracking-wider">错误信息</h3>
+          <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+            <p className="text-sm whitespace-pre-wrap text-red-700 dark:text-red-300">{execution.error_message}</p>
+          </div>
+        </Card>
+      )}
+
+      {(status === 'completed' || status === 'failed') && outputEntries.length > 0 && (
         <Card>
           <h3 className="mb-3 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">执行结果</h3>
           <div className="space-y-3">
@@ -208,10 +229,14 @@ export default function ExecutionDetailPage() {
       <Card>
         <h3 className="mb-4 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">执行步骤</h3>
         <div className="space-y-3">
-          {displaySteps.length === 0 && (
-            <p className="text-sm text-gray-400 py-8 text-center">
-              {execution.status === 'running' || execution.status === 'pending' ? '等待执行...' : '暂无步骤数据'}
-            </p>
+          {displaySteps.length === 0 && status === 'running' && (
+            <div className="flex items-center gap-3 text-sm text-gray-400 py-4">
+              <Spinner size="sm" />
+              <span>等待执行...</span>
+            </div>
+          )}
+          {displaySteps.length === 0 && status !== 'running' && (
+            <p className="text-sm text-gray-400 py-8 text-center">暂无步骤数据</p>
           )}
           {displaySteps.map((step, i) => (
             <div

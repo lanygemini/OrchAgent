@@ -41,7 +41,7 @@ export default function WorkflowListPage() {
       const res = await workflowApi.execute(executeTarget.id, { input_text: executeInput.trim() })
       setExecuteModalOpen(false)
       toast('success', `工作流「${executeTarget.name}」已开始执行`)
-      navigate(`/executions/${res.data.id}`)
+      navigate(`/executions/${res.data.id}`, { state: res.data })
     } catch (e: any) {
       toast('error', e?.response?.data?.detail || '执行失败')
     } finally {
