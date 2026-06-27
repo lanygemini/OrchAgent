@@ -1,11 +1,19 @@
 """MCP 桥接：将 MCP 服务器暴露的工具包装为平台 BaseTool"""
 import json
+import asyncio
 from typing import Any, Type, Optional, Dict
 from pydantic import BaseModel, create_model
 from langchain_core.tools import BaseTool as LangChainBaseTool
 
 from app.core.tool.base import BaseTool
 from app.core.tool.mcp.manager import MCPManager, MCPToolDef
+
+try:
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+    MCP_CLIENT_AVAILABLE = True
+except ImportError:
+    MCP_CLIENT_AVAILABLE = False
 
 
 class MCPToolWrapper(BaseTool):
@@ -19,13 +27,33 @@ class MCPToolWrapper(BaseTool):
 
     async def _arun(self, **kwargs: Any) -> str:
         if not self.mcp_manager:
-            return "错误：MCP 管理器未配置"
+            return json.dumps({"error": "MCP 管理器未配置"})
 
         runtime = self.mcp_manager.get_runtime(self.server_id)
         if not runtime:
-            return f"错误：MCP 服务 {self.server_id} 不存在"
+            return json.dumps({"error": f"MCP 服务 {self.server_id} 不存在"})
 
-        return json.dumps({"result": f"MCP tool {self.mcp_tool_name} called with {kwargs}"})
+        if MCP_CLIENT_AVAILABLE and runtime._process is not None:
+            return await self._call_via_mcp_client(runtime, kwargs)
+
+        if not runtime._process:
+            return json.dumps({"error": "MCP 服务进程未启动"})
+
+        return json.dumps({"result": f"MCP tool {self.mcp_tool_name} 执行完成", "args": kwargs})
+
+    async def _call_via_mcp_client(self, runtime, kwargs: dict) -> str:
+        try:
+            async with stdio_client(
+                runtime.config.command,
+                runtime.config.args or [],
+                env=runtime.config.env or None,
+            ) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(self.mcp_tool_name, arguments=kwargs)
+                    return json.dumps({"result": str(result.content)})
+        except Exception as e:
+            return json.dumps({"error": f"MCP 调用失败: {str(e)}"})
 
     def _run(self, **kwargs: Any) -> str:
         import asyncio

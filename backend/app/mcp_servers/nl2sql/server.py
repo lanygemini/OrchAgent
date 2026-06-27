@@ -44,7 +44,27 @@ def validate_sql(sql: str) -> tuple[bool, str]:
     return True, ""
 
 
-def create_nl2sql_server() -> Optional[object]:
+def build_select_sql(nl_query: str, db_schema: str) -> str:
+    """根据表结构生成简单的 SELECT 查询"""
+    tables = [line.strip() for line in db_schema.split('\n') if line.strip()]
+    if not tables:
+        return "SELECT 1"
+
+    table_info = {}
+    for line in tables:
+        if '(' in line:
+            tname = line.split('(')[0].strip()
+            cols_part = line[line.index('(')+1:line.rindex(')')]
+            cols = [c.strip().split()[0] for c in cols_part.split(',') if c.strip()]
+            table_info[tname] = cols
+
+    if not table_info:
+        return "SELECT 1"
+
+    tname = list(table_info.keys())[0]
+    cols = table_info[tname][:5]
+    cols_str = ', '.join(cols) if cols else '*'
+    return f"SELECT {cols_str} FROM {tname} LIMIT 10"
     """创建 NL2SQL MCP 服务器实例"""
     if not MCP_AVAILABLE:
         return None
@@ -85,7 +105,7 @@ def create_nl2sql_server() -> Optional[object]:
         if name == "translate_to_sql":
             nl_query = arguments.get("nl_query", "")
             db_schema = arguments.get("db_schema", "")
-            sql = f"-- NL: {nl_query}\n-- Schema: {db_schema[:50]}...\nSELECT 1"
+            sql = build_select_sql(nl_query, db_schema)
             return [TextContent(type="text", text=json.dumps({"sql": sql, "confidence": "low"}))]
 
         elif name == "execute_query":

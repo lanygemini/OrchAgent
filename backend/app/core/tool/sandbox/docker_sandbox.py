@@ -27,8 +27,9 @@ class DockerSandbox:
         self._available = self._check_docker()
 
     def _check_docker(self) -> bool:
-        """检查 Docker 是否可用（暂未实现）"""
-        return False
+        """检查 Docker 是否可用"""
+        import shutil
+        return shutil.which("docker") is not None
 
     async def execute(self, code: str, input_data: Optional[Dict[str, Any]] = None) -> SandboxResult:
         """在沙箱中执行 Python 代码"""
