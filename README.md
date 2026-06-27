@@ -8,13 +8,106 @@
 - **前端**: React 18, React Flow 12+, Zustand, TypeScript, TailwindCSS
 - **部署**: Docker Compose, Nginx
 
-## 快速开始
+## 前置依赖
+
+- **Python** 3.12+
+- **Node.js** 20+ （前端开发）
+- **Docker** + **Docker Compose** （PostgreSQL + Redis + 一键启动）
+- **PostgreSQL 16** + pgvector 扩展（本地开发时需安装）
+- **Redis 7** （会话缓存、SSE 事件、ARQ 任务队列）
+
+## 快速启动（Docker 一键部署）
 
 ```bash
+# 启动所有服务（PostgreSQL + Redis + API + 前端 + Nginx）
 docker compose up -d
+
+# 查看日志
+docker compose logs -f
+
+# 停止
+docker compose down
 ```
 
-API 文档：http://localhost:8000/docs
+启动后访问：
+- 后端 API 文档：http://localhost:8000/docs
+- 前端页面：http://localhost:3000
+- Nginx（反向代理入口）：http://localhost:80
+
+## 本地开发启动
+
+### 1. 启动基础设施
+
+先使用 Docker 启动数据库和缓存：
+
+```bash
+docker compose up -d postgres redis
+```
+
+### 2. 后端启动
+
+```bash
+# 进入后端目录
+cd backend
+
+# 创建虚拟环境
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动开发服务器（热重载）
+uvicorn app.main:app --reload --port 8000
+```
+
+后端默认配置从 `backend/.env` 读取，各配置项说明：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `ENVIRONMENT` | 运行环境（dev/prod） | dev |
+| `DATABASE_URL` | PostgreSQL 异步连接串 | postgresql+asyncpg://orchagent:orchagent@localhost:5432/orchagent |
+| `REDIS_URL` | Redis 连接串 | redis://localhost:6379/0 |
+| `JWT_SECRET` | JWT 签名密钥 | （生产环境必须修改） |
+| `OPENAI_API_KEY` | OpenAI API 密钥 | （留空则无法调用对应 LLM） |
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | 同上 |
+| `CORS_ORIGINS` | 允许的前端域名 | ["http://localhost:5173","http://localhost:3000"] |
+
+> 开发模式下应用启动时会自动创建数据库表（`Base.metadata.create_all`），生产环境请使用 Alembic 迁移。
+
+### 3. 前端启动
+
+```bash
+# 进入前端目录
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动开发服务器（端口 3000，自动代理 /api 到后端）
+npm run dev
+
+# 构建生产版本
+npm run build
+```
+
+前端开发服务器地址：http://localhost:3000
+
+Vite 已配置 `/api` 路径代理到 `http://localhost:8000`，无需额外配置跨域。
+
+### 4. 验证服务
+
+```bash
+# 后端健康检查
+curl http://localhost:8000/health
+
+# 预期响应
+{"status":"ok","version":"0.1.0","environment":"dev","message":"服务运行正常"}
+```
 
 ## 项目结构
 
