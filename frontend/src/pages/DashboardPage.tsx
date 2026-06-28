@@ -86,8 +86,17 @@ export default function DashboardPage() {
                 className="flex items-center justify-between rounded-lg border border-gray-100 dark:border-gray-700 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
                 onClick={() => navigate(`/executions/${exec.id}`)}
               >
-                <span className="text-sm text-gray-700 dark:text-gray-300">{exec.workflow_name}</span>
-                <span className="text-xs text-gray-400">{new Date(exec.created_at || '').toLocaleString('zh-CN')}</span>
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    exec.status === 'completed' ? 'bg-green-500' :
+                    exec.status === 'failed' ? 'bg-red-500' :
+                    exec.status === 'running' ? 'bg-blue-500 animate-pulse' :
+                    exec.status === 'cancelled' ? 'bg-gray-400' :
+                    'bg-yellow-500'
+                  }`} />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">{exec.workflow_name || '未命名工作流'}</span>
+                </div>
+                <span className="text-xs text-gray-400">{exec.created_at ? new Date(exec.created_at).toLocaleString('zh-CN') : ''}</span>
               </div>
             ))}
           </div>

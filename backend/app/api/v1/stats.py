@@ -37,11 +37,61 @@ async def get_dashboard(db: AsyncSession = Depends(get_db), user=Depends(get_cur
         .where(WorkflowExecution.created_by == user.sub, WorkflowExecution.status.in_(["pending", "running"]))
     )
 
+    # Token 用量统计
+    token_agg = await db.execute(
+        select(
+            func.coalesce(func.sum(TokenUsageRecord.total_tokens), 0),
+            func.coalesce(func.sum(TokenUsageRecord.estimated_cost), 0.0),
+        ).where(TokenUsageRecord.user_id == user.sub)
+    )
+    total_tokens, total_cost = token_agg.one()
+
+    # 成功率
+    completed_count = await db.scalar(
+        select(func.count(WorkflowExecution.id))
+        .where(WorkflowExecution.created_by == user.sub, WorkflowExecution.status == "completed")
+    )
+    finished_count = await db.scalar(
+        select(func.count(WorkflowExecution.id))
+        .where(WorkflowExecution.created_by == user.sub, WorkflowExecution.status.in_(["completed", "failed", "cancelled"]))
+    )
+    success_rate = round((completed_count or 0) / finished_count, 4) if finished_count else 0.0
+
+    # 最近 5 条执行记录
+    recent_result = await db.execute(
+        select(WorkflowExecution)
+        .where(WorkflowExecution.created_by == user.sub)
+        .order_by(WorkflowExecution.created_at.desc())
+        .limit(5)
+    )
+    recent_execs = recent_result.scalars().all()
+    recent_executions = [
+        {
+            "id": e.id,
+            "workflow_id": e.workflow_id,
+            "workflow_name": e.workflow_name,
+            "status": e.status,
+            "input_data": e.input_data,
+            "output_data": e.output_data,
+            "token_usage": e.token_usage,
+            "step_count": 0,
+            "started_at": e.started_at.isoformat() if e.started_at else None,
+            "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "error_message": e.error_message,
+        }
+        for e in recent_execs
+    ]
+
     return DashboardStats(
         total_agents=agent_count or 0,
         total_workflows=workflow_count or 0,
         total_tools=tool_count or 0,
         total_executions=exec_count or 0,
+        total_tokens=total_tokens,
+        total_cost=round(total_cost, 6),
+        success_rate=success_rate,
         executions_today=exec_today or 0,
         active_executions=active_execs or 0,
+        recent_executions=recent_executions,
     )
