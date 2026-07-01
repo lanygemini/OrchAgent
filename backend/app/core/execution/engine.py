@@ -64,10 +64,19 @@ class ExecutionEngine:
     async def _make_checkpointer(self):
         """创建 AsyncPostgresSaver checkpointer（每次执行创建新实例）
         AsyncPostgresSaver.from_conn_string 是 async context manager，不能缓存为单例。
+        Windows 上 psycopg async 不兼容 ProactorEventLoop，需跳过。
         返回 async context manager 或 None。"""
         sync_url = self._get_sync_url()
         if not sync_url:
             return None
+
+        # Windows ProactorEventLoop 不兼容 psycopg async，直接跳过
+        import sys
+        if sys.platform == "win32":
+            import asyncio
+            if isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+                logger.info("Windows ProactorEventLoop 不兼容 psycopg async，跳过 AsyncPostgresSaver")
+                return None
 
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -121,6 +130,7 @@ class ExecutionEngine:
 
     async def _run_execution(self, ctx: ExecutionContext, execution: WorkflowExecution):
         """内部执行逻辑：构建 DAG → 编译 LangGraph → 执行 → 结果回写"""
+        logger.info("_run_execution 开始 execution_id=%s", ctx.execution_id)
         async with async_session_factory() as bg_db:
             step_records: List[StepRecord] = []
 
@@ -175,9 +185,12 @@ class ExecutionEngine:
                 })
 
                 dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
+                logger.info("DAG 构建完成 execution_id=%s, nodes=%d, edges=%d, start=%s",
+                            ctx.execution_id, len(dag.nodes), len(dag.edges), dag.start_node_id)
                 await self._preload_agents(bg_db, dag)
                 await self._preload_tools(bg_db, dag)
                 graph, human_node_ids = self.compiler.compile(dag, step_callback=record_step)
+                logger.info("编译完成 execution_id=%s, human_node_ids=%s", ctx.execution_id, human_node_ids)
 
                 initial_state: AgentState = {
                     "messages": [],
@@ -201,15 +214,19 @@ class ExecutionEngine:
                 # 尝试用 AsyncPostgresSaver（持久化 checkpointer）
                 # 注意：aget_state 必须在 checkpointer 上下文内调用，所以执行和检测都放在同一上下文中
                 checkpointer_ctx = await self._make_checkpointer()
+                logger.info("checkpointer_ctx=%s execution_id=%s", type(checkpointer_ctx).__name__ if checkpointer_ctx else None, ctx.execution_id)
                 if checkpointer_ctx is not None:
                     async with checkpointer_ctx as checkpointer:
                         await checkpointer.setup()
                         app = graph.compile(checkpointer=checkpointer, interrupt_before=human_node_ids if human_node_ids else None)
+                        logger.info("开始 ainvoke (AsyncPostgresSaver) execution_id=%s", ctx.execution_id)
                         result = await app.ainvoke(initial_state, config=config)
+                        logger.info("ainvoke 完成 execution_id=%s, result keys=%s", ctx.execution_id, list(result.keys()) if isinstance(result, dict) else type(result))
                         # 在 checkpointer 上下文内检测 interrupt
                         if human_node_ids:
                             try:
                                 checkpoint_state = await app.aget_state(config)
+                                logger.info("aget_state: next=%s execution_id=%s", checkpoint_state.next, ctx.execution_id)
                                 if checkpoint_state.next:
                                     # human 节点 interrupt：执行暂停，等待人工输入
                                     await bg_db.execute(
@@ -220,18 +237,23 @@ class ExecutionEngine:
                                         "execution_id": ctx.execution_id,
                                         "message": "工作流暂停，等待人工输入",
                                     })
+                                    logger.info("执行暂停（human interrupt）execution_id=%s", ctx.execution_id)
                                     return
-                            except Exception:
-                                pass
+                            except Exception as ie:
+                                logger.warning("aget_state 检测 interrupt 失败: %s", ie)
                 else:
                     # 回退到 MemorySaver（内存 checkpointer，单 worker 下 interrupt 也可用）
                     memory_checkpointer = await self._make_memory_checkpointer()
+                    logger.info("使用 MemorySaver execution_id=%s", ctx.execution_id)
                     app = graph.compile(checkpointer=memory_checkpointer, interrupt_before=human_node_ids if human_node_ids else None)
+                    logger.info("开始 ainvoke (MemorySaver) execution_id=%s", ctx.execution_id)
                     result = await app.ainvoke(initial_state, config=config)
+                    logger.info("ainvoke 完成 execution_id=%s, result keys=%s", ctx.execution_id, list(result.keys()) if isinstance(result, dict) else type(result))
                     # MemorySaver 不需要上下文管理，直接检测
                     if human_node_ids:
                         try:
                             checkpoint_state = await app.aget_state(config)
+                            logger.info("aget_state: next=%s execution_id=%s", checkpoint_state.next, ctx.execution_id)
                             if checkpoint_state.next:
                                 await bg_db.execute(
                                     update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="paused")
@@ -241,9 +263,10 @@ class ExecutionEngine:
                                     "execution_id": ctx.execution_id,
                                     "message": "工作流暂停，等待人工输入",
                                 })
+                                logger.info("执行暂停（human interrupt）execution_id=%s", ctx.execution_id)
                                 return
-                        except Exception:
-                            pass
+                        except Exception as ie:
+                            logger.warning("aget_state 检测 interrupt 失败: %s", ie)
 
                 total_tokens = sum(
                     (s.token_usage or {}).get("total_tokens", 0) for s in step_records
@@ -279,14 +302,19 @@ class ExecutionEngine:
 
             except Exception as e:
                 logger.exception("执行引擎异常 execution_id=%s", ctx.execution_id)
-                await bg_db.execute(
-                    update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
-                        status="failed",
-                        error_message=str(e),
-                        completed_at=datetime.now(timezone.utc),
-                    )
-                )
-                await bg_db.commit()
+                # 用独立 session 写入错误状态，避免 bg_db 已损坏导致 commit 失败
+                try:
+                    async with async_session_factory() as err_db:
+                        await err_db.execute(
+                            update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
+                                status="failed",
+                                error_message=str(e),
+                                completed_at=datetime.now(timezone.utc),
+                            )
+                        )
+                        await err_db.commit()
+                except Exception:
+                    logger.exception("写入错误状态也失败 execution_id=%s", ctx.execution_id)
 
                 await self.streamer.publish(ctx.execution_id, "execution.failed", {
                     "execution_id": ctx.execution_id,
