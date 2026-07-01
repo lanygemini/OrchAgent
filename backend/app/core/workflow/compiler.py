@@ -97,7 +97,8 @@ class WorkflowCompiler:
         return errors
 
     def compile(self, dag: DAGDefinition, step_callback: Optional[StepCallback] = None) -> StateGraph:
-        """将 DAG 编译为 LangGraph StateGraph，step_callback 在每个节点执行后触发"""
+        """将 DAG 编译为 LangGraph StateGraph，step_callback 在每个节点执行后触发
+        human 节点自动设置 interrupt_before，使图执行到此暂停等待人工输入"""
         errors = self.validate(dag)
         if errors:
             raise ValidationError("；".join(errors))
@@ -107,10 +108,14 @@ class WorkflowCompiler:
         graph.set_entry_point(dag.start_node_id)
 
         node_map: Dict[str, DAGNode] = {n.id: n for n in dag.nodes}
+        # 收集 human 节点 ID，用于设置 interrupt_before
+        human_node_ids: List[str] = []
 
         for node in dag.nodes:
             handler = self._get_node_handler(node, step_callback)
             graph.add_node(node.id, handler)
+            if node.type == "human":
+                human_node_ids.append(node.id)
 
         # 按源节点分组边
         edges_from_source: Dict[str, List[DAGEdge]] = {}
@@ -135,26 +140,44 @@ class WorkflowCompiler:
                 else:
                     graph.add_edge(node.id, edge.target_node_id)
             elif len(outgoing) > 1:
-                # 多条出边：条件分支路由
+                # 多条出边
+                source_node = node_map.get(node.id)
+                is_fork = source_node and source_node.type == "fork"
                 has_conditions = any(e.condition_expr for e in outgoing)
-                if has_conditions:
+
+                if is_fork and not has_conditions:
+                    # fork 节点：多条无条件出边 → LangGraph 自动并行执行
+                    for edge in outgoing:
+                        graph.add_edge(node.id, edge.target_node_id)
+                elif has_conditions:
+                    # 条件分支路由
                     def make_router(edges: List[DAGEdge]):
-                        def router(state: AgentState) -> str:
+                        def router(state: AgentState) -> List[str]:
+                            """条件路由：返回目标节点 ID 列表（支持多目标并行）"""
+                            targets = []
                             for edge in edges:
                                 if edge.condition_expr:
                                     try:
                                         result = eval(edge.condition_expr, {"state": state, "context": state.get("context", {})})
                                         if result:
-                                            return edge.target_node_id
+                                            targets.append(edge.target_node_id)
                                     except Exception:
                                         continue
-                            return edges[-1].target_node_id
+                            # 无条件匹配时走最后一条边（默认分支）
+                            if not targets:
+                                targets.append(edges[-1].target_node_id)
+                            return targets if len(targets) > 1 else targets[0]
                         return router
                     branch_map = {e.target_node_id: e.target_node_id for e in outgoing}
                     graph.add_conditional_edges(node.id, make_router(outgoing), branch_map)
                 else:
+                    # 非 fork 的多条无条件出边（也按并行处理）
                     for edge in outgoing:
                         graph.add_edge(node.id, edge.target_node_id)
+
+        # 设置 human 节点在执行前中断，等待人工输入
+        if human_node_ids:
+            graph.interrupt_before = human_node_ids
 
         return graph
 
@@ -270,17 +293,54 @@ class WorkflowCompiler:
             changes["error"] = f"工具调用失败: {str(e)}"
 
     async def _handle_condition_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
-        """条件节点：占位，由边上的条件表达式处理"""
-        pass
+        """条件节点：求值条件表达式，将结果写入 context 供边上路由使用"""
+        # 条件节点的实际路由由边上的条件表达式完成
+        # 此处仅标记当前节点已执行，供日志追踪
+        changes["context"] = {**state.get("context", {}), "_condition_evaluated": True}
 
     async def _handle_fork_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
-        """分支节点：占位"""
-        pass
+        """分支节点：标记并行分支开始，将当前上下文快照传递给各分支
+        LangGraph 通过多条出边自动并行执行，此节点负责保存分支前的状态快照"""
+        # 保存分支前的 tool_results 快照，供 join 节点合并时使用
+        existing_results = dict(state.get("tool_results", {}))
+        changes["context"] = {
+            **state.get("context", {}),
+            "_fork_snapshot": existing_results,
+        }
 
     async def _handle_join_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
-        """汇合节点：占位"""
-        pass
+        """汇合节点：聚合并行分支结果
+        merge_tool_results reducer 已自动合并各分支的 tool_results，
+        此处汇总 token 用量并清理分支快照"""
+        current_results = state.get("tool_results", {})
+        context = dict(state.get("context", {}))
+
+        # 汇总各分支的 token 用量
+        total_prompt = 0
+        total_completion = 0
+        total_total = 0
+        for key, value in current_results.items():
+            if isinstance(value, dict) and "token_usage" in value:
+                tu = value["token_usage"]
+                total_prompt += tu.get("prompt_tokens", 0)
+                total_completion += tu.get("completion_tokens", 0)
+                total_total += tu.get("total_tokens", 0)
+
+        if total_total > 0:
+            changes["_last_token_usage"] = {
+                "prompt_tokens": total_prompt,
+                "completion_tokens": total_completion,
+                "total_tokens": total_total,
+            }
+
+        # 清理分支快照
+        context.pop("_fork_snapshot", None)
+        changes["context"] = context
 
     async def _handle_human_node(self, state: AgentState, changes: Dict[str, Any]) -> None:
-        """人工节点：标记需要人工输入"""
+        """人工节点：标记需要人工输入，配合 LangGraph interrupt 实现真正暂停
+        需在 compile 时对 human 节点设置 interrupt_before，使图执行到此暂停"""
         changes["needs_human_input"] = True
+        # 如果已有 human_input（resume 后传入），则清除暂停标记继续执行
+        if state.get("human_input"):
+            changes["needs_human_input"] = False
