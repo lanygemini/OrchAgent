@@ -1,4 +1,4 @@
-"""MCP 服务管理器：管理 MCP 服务器的生命周期（启动/停止/健康检查）"""
+"""MCP 服务管理器：管理 MCP 服务器的生命周期（启动/停止/健康检查/工具发现）"""
 import asyncio
 import json
 from typing import Optional, Dict, List, Any
@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.core.tool.base import BaseTool
+
+try:
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client
+    MCP_CLIENT_AVAILABLE = True
+except ImportError:
+    MCP_CLIENT_AVAILABLE = False
 
 
 @dataclass
@@ -39,9 +46,11 @@ class MCPServerRuntime:
         self._process: Optional[asyncio.subprocess.Process] = None
         self._tools: List[MCPToolDef] = []
         self._healthy = False
+        self._session: Optional[Any] = None  # 复用的 ClientSession
+        self._session_context: Optional[Any] = None  # stdio_client 上下文
 
     async def start(self):
-        """启动 MCP 服务器进程（stdio 模式）"""
+        """启动 MCP 服务器进程（stdio 模式）并发现工具"""
         if self.config.transport == "stdio" and self.config.command:
             self._process = await asyncio.create_subprocess_exec(
                 self.config.command,
@@ -53,8 +62,20 @@ class MCPServerRuntime:
             )
             self._healthy = True
 
+            # 启动后通过 MCP 协议发现工具
+            await self.discover_tools_via_protocol()
+
     async def stop(self):
-        """停止 MCP 服务器进程"""
+        """停止 MCP 服务器进程并清理 session"""
+        # 清理复用的 session
+        if self._session_context:
+            try:
+                await self._session_context.__aexit__(None, None, None)
+            except Exception:
+                pass
+            self._session_context = None
+            self._session = None
+
         if self._process:
             self._process.kill()
             await self._process.wait()
@@ -70,6 +91,56 @@ class MCPServerRuntime:
 
     def set_tools(self, tools: List[MCPToolDef]):
         self._tools = tools
+
+    async def discover_tools_via_protocol(self):
+        """通过 MCP 协议 list_tools 发现工具并填充 _tools"""
+        if not MCP_CLIENT_AVAILABLE or not self._process:
+            return
+
+        try:
+            async with stdio_client(
+                self.config.command,
+                self.config.args or [],
+                env=self.config.env or None,
+            ) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    tools = []
+                    for tool in result.tools:
+                        tools.append(MCPToolDef(
+                            name=tool.name,
+                            description=tool.description or "",
+                            input_schema=tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                        ))
+                    self._tools = tools
+        except Exception:
+            # 发现失败时保留空列表，不影响启动
+            self._tools = []
+
+    async def get_session(self):
+        """获取复用的 MCP ClientSession（首次调用时创建，后续复用）"""
+        if self._session is not None:
+            return self._session
+
+        if not MCP_CLIENT_AVAILABLE or not self.config.command:
+            return None
+
+        try:
+            # 创建新的 stdio_client 连接用于复用
+            ctx = stdio_client(
+                self.config.command,
+                self.config.args or [],
+                env=self.config.env or None,
+            )
+            read, write = await ctx.__aenter__()
+            session_ctx = ClientSession(read, write)
+            self._session = await session_ctx.__aenter__()
+            await self._session.initialize()
+            self._session_context = ctx
+            return self._session
+        except Exception:
+            return None
 
 
 class MCPManager:

@@ -33,6 +33,19 @@ class MCPToolWrapper(BaseTool):
         if not runtime:
             return json.dumps({"error": f"MCP 服务 {self.server_id} 不存在"})
 
+        # 优先使用复用的 session
+        if MCP_CLIENT_AVAILABLE:
+            try:
+                session = await runtime.get_session()
+                if session:
+                    result = await session.call_tool(self.mcp_tool_name, arguments=kwargs)
+                    return json.dumps({"result": str(result.content)})
+            except Exception as e:
+                # session 失效时清理并回退到新建连接
+                runtime._session = None
+                runtime._session_context = None
+
+        # 回退：新建连接（一次性使用）
         if MCP_CLIENT_AVAILABLE and runtime._process is not None:
             return await self._call_via_mcp_client(runtime, kwargs)
 
