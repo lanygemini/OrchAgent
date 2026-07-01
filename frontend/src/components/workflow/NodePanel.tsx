@@ -152,6 +152,60 @@ export default function NodePanel({ node, agents, tools, onChange, onDelete, onC
           </div>
         )}
 
+        {nodeType === 'fork' && (
+          <div>
+            <p className="text-xs text-gray-400">
+              分支节点会将执行分为多个并行分支。从此节点连出的多条边将并行执行。
+            </p>
+            <div className="mt-2">
+              <label className={labelClass}>分支说明</label>
+              <input
+                className={fieldClass}
+                value={data.config?.fork_description || ''}
+                onChange={(e) => patch({ config: { ...(data.config || {}), fork_description: e.target.value } })}
+                placeholder="描述并行分支的目的"
+              />
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'join' && (
+          <div>
+            <p className="text-xs text-gray-400">
+              汇合节点会等待所有并行分支完成，合并结果后继续执行。所有分支应连入此节点。
+            </p>
+            <div className="mt-2">
+              <label className={labelClass}>汇合策略</label>
+              <select
+                className={fieldClass}
+                value={data.config?.join_strategy || 'wait_all'}
+                onChange={(e) => patch({ config: { ...(data.config || {}), join_strategy: e.target.value } })}
+              >
+                <option value="wait_all">等待所有分支</option>
+                <option value="wait_any">任一分支完成即继续</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {nodeType === 'human' && (
+          <div>
+            <p className="text-xs text-gray-400">
+              人工审批节点：工作流执行到此会暂停，等待人工输入后继续。
+            </p>
+            <div className="mt-2">
+              <label className={labelClass}>提示信息</label>
+              <textarea
+                className={fieldClass}
+                rows={3}
+                value={data.config?.human_prompt || ''}
+                onChange={(e) => patch({ config: { ...(data.config || {}), human_prompt: e.target.value } })}
+                placeholder="请审核以上结果，输入批准或拒绝"
+              />
+            </div>
+          </div>
+        )}
+
         {isStartEnd && (
           <p className="text-xs text-gray-400">起始 / 结束节点无需额外配置。</p>
         )}

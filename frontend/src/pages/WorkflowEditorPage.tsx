@@ -27,6 +27,16 @@ const nodeTypes = {
   condition: ConditionNode,
 }
 
+// 可拖拽的节点类型配置
+const DRAGGABLE_NODE_TYPES = [
+  { type: 'agent', icon: '🤖', label: 'Agent' },
+  { type: 'tool', icon: '🔧', label: '工具' },
+  { type: 'condition', icon: '◇', label: '条件' },
+  { type: 'fork', icon: '⑂', label: '分支' },
+  { type: 'join', icon: '⇉', label: '汇合' },
+  { type: 'human', icon: '👤', label: '人工' },
+]
+
 const defaultNodes: Node[] = [
   {
     id: 'start',
@@ -200,18 +210,39 @@ export default function WorkflowEditorPage() {
       if (!type) return
       const position = { x: event.clientX - 150, y: event.clientY - 50 }
       const newId = `${type}-${Date.now()}`
-      const label = type === 'agent' ? 'AI助手' : type === 'tool' ? '工具' : '条件'
+      const labelMap: Record<string, string> = {
+        agent: 'AI助手', tool: '工具', condition: '条件',
+        fork: '分支', join: '汇合', human: '人工审批',
+      }
       const newNode: Node = {
         id: newId,
-        type,
+        type: type === 'condition' ? 'condition' : type === 'tool' ? 'tool' : 'agent',
         position,
-        data: { label, type, agent_id: null, tool_id: null, config: {} },
+        data: { label: labelMap[type] || type, type, agent_id: null, tool_id: null, config: {} },
       }
       setNodes((nds) => [...nds, newNode])
       setSelectedNodeId(newId)
     },
     [setNodes],
   )
+
+  const handleValidate = async () => {
+    if (!id || isNew) {
+      alert('请先保存工作流后再验证')
+      return
+    }
+    try {
+      const res = await workflowApi.validate(id)
+      const errors = res.data?.errors || res.data?.detail || []
+      if (Array.isArray(errors) && errors.length > 0) {
+        alert('验证发现问题：\n' + errors.join('\n'))
+      } else {
+        alert('✅ 工作流验证通过')
+      }
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '验证失败')
+    }
+  }
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -248,7 +279,7 @@ export default function WorkflowEditorPage() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary">验证</Button>
+          <Button variant="secondary" onClick={handleValidate}>验证</Button>
           <Button onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</Button>
         </div>
       </div>
@@ -257,19 +288,17 @@ export default function WorkflowEditorPage() {
         <div className="w-56 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
           <h3 className="mb-3 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">节点</h3>
           <div className="space-y-2">
-            {['agent', 'tool', 'condition'].map((type) => (
+            {DRAGGABLE_NODE_TYPES.map((nt) => (
               <div
-                key={type}
+                key={nt.type}
                 className="cursor-grab rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                 draggable
                 onDragStart={(e) => {
-                  e.dataTransfer.setData('application/reactflow', type)
+                  e.dataTransfer.setData('application/reactflow', nt.type)
                   e.dataTransfer.effectAllowed = 'move'
                 }}
               >
-                {type === 'agent' && '🤖 Agent'}
-                {type === 'tool' && '🔧 工具'}
-                {type === 'condition' && '◇ 条件'}
+                {nt.icon} {nt.label}
               </div>
             ))}
           </div>
