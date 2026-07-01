@@ -135,6 +135,12 @@ class ExecutionEngine:
                 })
 
             try:
+                # 预算检查前置：执行前验证用户是否在预算限额内
+                if self.budget_controller and ctx.user_id:
+                    budget_status = await self.budget_controller.check_budget(ctx.user_id)
+                    if not budget_status.within_budget:
+                        raise PermissionError(budget_status.warning or "超出预算限额，无法执行工作流")
+
                 await bg_db.execute(
                     update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="running")
                 )
