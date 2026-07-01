@@ -177,7 +177,7 @@ class ExecutionEngine:
                 dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
                 await self._preload_agents(bg_db, dag)
                 await self._preload_tools(bg_db, dag)
-                graph = self.compiler.compile(dag, step_callback=record_step)
+                graph, human_node_ids = self.compiler.compile(dag, step_callback=record_step)
 
                 initial_state: AgentState = {
                     "messages": [],
@@ -199,36 +199,51 @@ class ExecutionEngine:
                 config = {"configurable": {"thread_id": ctx.execution_id}}
 
                 # 尝试用 AsyncPostgresSaver（持久化 checkpointer）
+                # 注意：aget_state 必须在 checkpointer 上下文内调用，所以执行和检测都放在同一上下文中
                 checkpointer_ctx = await self._make_checkpointer()
                 if checkpointer_ctx is not None:
                     async with checkpointer_ctx as checkpointer:
-                        checkpointer.setup()
-                        app = graph.compile(checkpointer=checkpointer)
+                        await checkpointer.setup()
+                        app = graph.compile(checkpointer=checkpointer, interrupt_before=human_node_ids if human_node_ids else None)
                         result = await app.ainvoke(initial_state, config=config)
+                        # 在 checkpointer 上下文内检测 interrupt
+                        if human_node_ids:
+                            try:
+                                checkpoint_state = await app.aget_state(config)
+                                if checkpoint_state.next:
+                                    # human 节点 interrupt：执行暂停，等待人工输入
+                                    await bg_db.execute(
+                                        update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="paused")
+                                    )
+                                    await bg_db.commit()
+                                    await self.streamer.publish(ctx.execution_id, "human.required", {
+                                        "execution_id": ctx.execution_id,
+                                        "message": "工作流暂停，等待人工输入",
+                                    })
+                                    return
+                            except Exception:
+                                pass
                 else:
                     # 回退到 MemorySaver（内存 checkpointer，单 worker 下 interrupt 也可用）
                     memory_checkpointer = await self._make_memory_checkpointer()
-                    app = graph.compile(checkpointer=memory_checkpointer)
+                    app = graph.compile(checkpointer=memory_checkpointer, interrupt_before=human_node_ids if human_node_ids else None)
                     result = await app.ainvoke(initial_state, config=config)
-
-                # 检查是否因 human 节点而中断（LangGraph interrupt 返回部分结果）
-                # 此时需要将执行状态标记为 paused 而非 completed
-                next_instruction = result.get("__interrupt__") if isinstance(result, dict) else None
-                if next_instruction:
-                    # human 节点 interrupt：执行暂停，等待人工输入
-                    await bg_db.execute(
-                        update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(
-                            status="paused",
-                        )
-                    )
-                    await bg_db.commit()
-
-                    await self.streamer.publish(ctx.execution_id, "human.required", {
-                        "execution_id": ctx.execution_id,
-                        "message": str(next_instruction),
-                    })
-                    # 不发布 execution.completed，执行仍在暂停中
-                    return
+                    # MemorySaver 不需要上下文管理，直接检测
+                    if human_node_ids:
+                        try:
+                            checkpoint_state = await app.aget_state(config)
+                            if checkpoint_state.next:
+                                await bg_db.execute(
+                                    update(WorkflowExecution).where(WorkflowExecution.id == execution.id).values(status="paused")
+                                )
+                                await bg_db.commit()
+                                await self.streamer.publish(ctx.execution_id, "human.required", {
+                                    "execution_id": ctx.execution_id,
+                                    "message": "工作流暂停，等待人工输入",
+                                })
+                                return
+                        except Exception:
+                            pass
 
                 total_tokens = sum(
                     (s.token_usage or {}).get("total_tokens", 0) for s in step_records
@@ -443,8 +458,8 @@ class ExecutionEngine:
                         "status": step.status,
                     })
 
-                graph = self.compiler.compile(dag, step_callback=record_step)
-                app = graph.compile(checkpointer=checkpointer)
+                graph, human_node_ids = self.compiler.compile(dag, step_callback=record_step)
+                app = graph.compile(checkpointer=checkpointer, interrupt_before=human_node_ids if human_node_ids else None)
 
                 # 传入 human_input 作为恢复时的状态更新
                 if human_input:
@@ -454,19 +469,24 @@ class ExecutionEngine:
                     result_state = await app.ainvoke(None, config=config)
 
                 # 检查是否再次 interrupt（多个 human 节点场景）
-                next_instruction = result_state.get("__interrupt__") if isinstance(result_state, dict) else None
-                if next_instruction:
-                    await self.db.execute(
-                        update(WorkflowExecution).where(WorkflowExecution.id == execution_id).values(
-                            status="paused",
-                        )
-                    )
-                    await self.db.commit()
-                    await self.streamer.publish(execution_id, "human.required", {
-                        "execution_id": execution_id,
-                        "message": str(next_instruction),
-                    })
-                    return
+                # interrupt_before 触发时需通过 aget_state 检测，而非 __interrupt__ key
+                if human_node_ids:
+                    try:
+                        checkpoint_state = await app.aget_state(config)
+                        if checkpoint_state.next:
+                            await self.db.execute(
+                                update(WorkflowExecution).where(WorkflowExecution.id == execution_id).values(
+                                    status="paused",
+                                )
+                            )
+                            await self.db.commit()
+                            await self.streamer.publish(execution_id, "human.required", {
+                                "execution_id": execution_id,
+                                "message": "工作流暂停，等待人工输入",
+                            })
+                            return
+                    except Exception:
+                        pass
 
                 # 更新执行结果
                 total_tokens = sum(
@@ -495,7 +515,7 @@ class ExecutionEngine:
             checkpointer_ctx = await self._make_checkpointer()
             if checkpointer_ctx is not None:
                 async with checkpointer_ctx as checkpointer:
-                    checkpointer.setup()
+                    await checkpointer.setup()
                     await _do_resume(checkpointer)
             else:
                 # 回退到 MemorySaver（仅单 worker 环境下可用）

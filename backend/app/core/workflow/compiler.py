@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.postgres import PostgresSaver
 
 from app.core.workflow.state import AgentState
 from app.core.workflow.safe_eval import safe_eval
@@ -97,7 +96,7 @@ class WorkflowCompiler:
 
         return errors
 
-    def compile(self, dag: DAGDefinition, step_callback: Optional[StepCallback] = None) -> StateGraph:
+    def compile(self, dag: DAGDefinition, step_callback: Optional[StepCallback] = None) -> tuple:
         """将 DAG 编译为 LangGraph StateGraph，step_callback 在每个节点执行后触发
         human 节点自动设置 interrupt_before，使图执行到此暂停等待人工输入"""
         errors = self.validate(dag)
@@ -176,11 +175,8 @@ class WorkflowCompiler:
                     for edge in outgoing:
                         graph.add_edge(node.id, edge.target_node_id)
 
-        # 设置 human 节点在执行前中断，等待人工输入
-        if human_node_ids:
-            graph.interrupt_before = human_node_ids
-
-        return graph
+        # 返回 (StateGraph, human_node_ids)，human_node_ids 需在 graph.compile() 时作为 interrupt_before 参数传入
+        return graph, human_node_ids
 
     def _get_node_handler(self, node: DAGNode, step_callback: Optional[StepCallback] = None) -> Callable:
         """根据节点类型返回对应的处理函数（闭包绑定节点配置），并用 step_callback 记录步骤"""
