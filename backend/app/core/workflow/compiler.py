@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from app.core.workflow.state import AgentState
+from app.core.workflow.safe_eval import safe_eval
 from app.core.agent.agent_manager import AgentManager, AgentRuntime
 from app.core.tool.registry import tool_registry
 from app.core.memory.episodic import EpisodicMemoryStore
@@ -131,7 +132,7 @@ class WorkflowCompiler:
                     def make_router(expr: str):
                         def router(state: AgentState) -> str:
                             try:
-                                result = eval(expr, {"state": state, "context": state.get("context", {})})
+                                result = safe_eval(expr, state, state.get("context", {}))
                                 return str(result).lower()
                             except Exception:
                                 return edge.target_node_id
@@ -158,7 +159,7 @@ class WorkflowCompiler:
                             for edge in edges:
                                 if edge.condition_expr:
                                     try:
-                                        result = eval(edge.condition_expr, {"state": state, "context": state.get("context", {})})
+                                        result = safe_eval(edge.condition_expr, state, state.get("context", {}))
                                         if result:
                                             targets.append(edge.target_node_id)
                                     except Exception:
