@@ -11,13 +11,15 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import AgentNode from '../components/workflow/AgentNode'
 import ToolNode from '../components/workflow/ToolNode'
 import ConditionNode from '../components/workflow/ConditionNode'
+import NodePanel, { type NodeData } from '../components/workflow/NodePanel'
 import { Button } from '../components/ui'
-import { workflowApi, agentApi } from '../api/client'
+import { workflowApi, agentApi, toolApi } from '../api/client'
 
 const nodeTypes = {
   agent: AgentNode,
@@ -66,24 +68,37 @@ function toReactFlowEdges(dagEdges: any[]): Edge[] {
 }
 
 function toDAGFormat(nodes: Node[], edges: Edge[], startNodeId: string) {
+  // 条件节点把 config.condition_expr 下放到其出边，供后端边路由使用
+  const nodeCondition: Record<string, string> = {}
+  for (const n of nodes) {
+    const expr = (n.data as NodeData)?.config?.condition_expr
+    if ((n.data as NodeData)?.type === 'condition' && typeof expr === 'string' && expr.trim()) {
+      nodeCondition[n.id] = expr.trim()
+    }
+  }
+
   return {
     nodes: nodes.map((n) => ({
       id: n.id,
-      type: n.data?.type || n.type || 'agent',
-      label: n.data?.label || '',
-      config: n.data?.config || {},
+      type: (n.data as NodeData)?.type || n.type || 'agent',
+      label: (n.data as NodeData)?.label || '',
+      config: (n.data as NodeData)?.config || {},
       position_x: n.position.x,
       position_y: n.position.y,
-      agent_id: n.data?.agent_id || null,
-      tool_id: n.data?.tool_id || null,
+      agent_id: (n.data as NodeData)?.agent_id || null,
+      tool_id: (n.data as NodeData)?.tool_id || null,
     })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source_node_id: e.source,
-      target_node_id: e.target,
-      condition_expr: typeof e.label === 'string' && e.label.startsWith('if ') ? e.label : null,
-      label: typeof e.label === 'string' ? e.label : '',
-    })),
+    edges: edges.map((e) => {
+      const fromCondition = nodeCondition[e.source] || null
+      const labelExpr = typeof e.label === 'string' && e.label.startsWith('if ') ? e.label : null
+      return {
+        id: e.id,
+        source_node_id: e.source,
+        target_node_id: e.target,
+        condition_expr: fromCondition || labelExpr,
+        label: typeof e.label === 'string' ? e.label : '',
+      }
+    }),
     start_node_id: startNodeId,
   }
 }
@@ -95,17 +110,25 @@ export default function WorkflowEditorPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [agents, setAgents] = useState<any[]>([])
+  const [tools, setTools] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(defaultNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
   const startNodeId = useMemo(() => {
-    const start = nodes.find((n) => n.data?.type === 'start')
+    const start = nodes.find((n) => (n.data as NodeData)?.type === 'start')
     return start?.id || 'start'
   }, [nodes])
 
+  const selectedNode = useMemo(
+    () => nodes.find((n) => n.id === selectedNodeId) || null,
+    [nodes, selectedNodeId],
+  )
+
   useEffect(() => {
     agentApi.list().then((res: any) => setAgents(res.data.items || [])).catch(() => {})
+    toolApi.list().then((res: any) => setTools(res.data.items || res.data || [])).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -115,12 +138,48 @@ export default function WorkflowEditorPage() {
         setName(wf.name || '')
         setDescription(wf.description || '')
         if (wf.dag) {
-          setNodes(toReactFlowNodes(wf.dag.nodes || []))
+          const rfNodes = toReactFlowNodes(wf.dag.nodes || [])
+          // 把出边上的 condition_expr 回填到对应条件节点的 config，供面板回显
+          const condBySource: Record<string, string> = {}
+          for (const e of wf.dag.edges || []) {
+            if (e.condition_expr) condBySource[e.source_node_id] = e.condition_expr
+          }
+          for (const n of rfNodes) {
+            const d = n.data as NodeData
+            if (d.type === 'condition' && condBySource[n.id]) {
+              d.config = { ...(d.config || {}), condition_expr: condBySource[n.id] }
+            }
+          }
+          setNodes(rfNodes)
           setEdges(toReactFlowEdges(wf.dag.edges || []))
         }
       }).catch(() => navigate('/workflows'))
     }
   }, [id, isNew])
+
+  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
+    setSelectedNodeId(node.id)
+  }, [])
+
+  const handleNodeChange = useCallback(
+    (nodeId: string, patch: Partial<NodeData>) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...(n.data as NodeData), ...patch } } : n,
+        ),
+      )
+    },
+    [setNodes],
+  )
+
+  const handleNodeDelete = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== nodeId))
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
+      setSelectedNodeId(null)
+    },
+    [setNodes, setEdges],
+  )
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -142,19 +201,16 @@ export default function WorkflowEditorPage() {
       const position = { x: event.clientX - 150, y: event.clientY - 50 }
       const newId = `${type}-${Date.now()}`
       const label = type === 'agent' ? 'AI助手' : type === 'tool' ? '工具' : '条件'
-      let agentId = null
-      if (type === 'agent' && agents.length > 0) {
-        agentId = agents[0].id
-      }
       const newNode: Node = {
         id: newId,
         type,
         position,
-        data: { label, type, agent_id: agentId, tool_id: null },
+        data: { label, type, agent_id: null, tool_id: null, config: {} },
       }
       setNodes((nds) => [...nds, newNode])
+      setSelectedNodeId(newId)
     },
-    [setNodes, agents],
+    [setNodes],
   )
 
   const handleSave = async () => {
@@ -236,6 +292,8 @@ export default function WorkflowEditorPage() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeClick={onNodeClick}
+            onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
             fitView
           >
@@ -244,6 +302,15 @@ export default function WorkflowEditorPage() {
             <MiniMap />
           </ReactFlow>
         </div>
+
+        <NodePanel
+          node={selectedNode}
+          agents={agents}
+          tools={tools}
+          onChange={handleNodeChange}
+          onDelete={handleNodeDelete}
+          onClose={() => setSelectedNodeId(null)}
+        />
       </div>
     </div>
   )
