@@ -123,6 +123,7 @@ export default function WorkflowEditorPage() {
   const [tools, setTools] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(defaultNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
@@ -130,6 +131,11 @@ export default function WorkflowEditorPage() {
     const start = nodes.find((n) => (n.data as NodeData)?.type === 'start')
     return start?.id || 'start'
   }, [nodes])
+
+  const selectedEdge = useMemo(
+    () => edges.find((e) => e.id === selectedEdgeId) || null,
+    [edges, selectedEdgeId],
+  )
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || null,
@@ -169,7 +175,21 @@ export default function WorkflowEditorPage() {
 
   const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id)
+    setSelectedEdgeId(null)
   }, [])
+
+  const onEdgeClick = useCallback((_: any, edge: Edge) => {
+    setSelectedEdgeId(edge.id)
+    setSelectedNodeId(null)
+  }, [])
+
+  const handleEdgeDelete = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId))
+      setSelectedEdgeId(null)
+    },
+    [setEdges],
+  )
 
   const handleNodeChange = useCallback(
     (nodeId: string, patch: Partial<NodeData>) => {
@@ -187,6 +207,7 @@ export default function WorkflowEditorPage() {
       setNodes((nds) => nds.filter((n) => n.id !== nodeId))
       setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
       setSelectedNodeId(null)
+      setSelectedEdgeId(null)
     },
     [setNodes, setEdges],
   )
@@ -322,7 +343,8 @@ export default function WorkflowEditorPage() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeClick={onNodeClick}
-            onPaneClick={() => setSelectedNodeId(null)}
+            onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null) }}
+            onEdgeClick={onEdgeClick}
             nodeTypes={nodeTypes}
             fitView
           >
@@ -334,11 +356,13 @@ export default function WorkflowEditorPage() {
 
         <NodePanel
           node={selectedNode}
+          selectedEdge={selectedEdge}
           agents={agents}
           tools={tools}
           onChange={handleNodeChange}
-          onDelete={handleNodeDelete}
-          onClose={() => setSelectedNodeId(null)}
+          onDeleteNode={handleNodeDelete}
+          onDeleteEdge={handleEdgeDelete}
+          onClose={() => { setSelectedNodeId(null); setSelectedEdgeId(null) }}
         />
       </div>
     </div>

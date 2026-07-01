@@ -1,4 +1,4 @@
-import { type Node } from '@xyflow/react'
+import { type Node, type Edge } from '@xyflow/react'
 import { Button } from '../ui'
 
 export interface NodeData {
@@ -23,10 +23,12 @@ interface ToolOption {
 
 interface NodePanelProps {
   node: Node | null
+  selectedEdge: Edge | null
   agents: AgentOption[]
   tools: ToolOption[]
   onChange: (nodeId: string, patch: Partial<NodeData>) => void
-  onDelete: (nodeId: string) => void
+  onDeleteNode: (nodeId: string) => void
+  onDeleteEdge: (edgeId: string) => void
   onClose: () => void
 }
 
@@ -46,7 +48,57 @@ const fieldClass =
 
 const labelClass = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'
 
-export default function NodePanel({ node, agents, tools, onChange, onDelete, onClose }: NodePanelProps) {
+export default function NodePanel({ node, selectedEdge, agents, tools, onChange, onDeleteNode, onDeleteEdge, onClose }: NodePanelProps) {
+  // 选中边时显示边删除面板
+  if (!node && !selectedEdge) return null
+
+  // 边选中面板
+  if (selectedEdge && !node) {
+    return (
+      <div className="w-80 shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
+        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            连线配置
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div>
+            <label className={labelClass}>连线 ID</label>
+            <input className={`${fieldClass} text-gray-400`} value={selectedEdge.id} disabled readOnly />
+          </div>
+          <div>
+            <label className={labelClass}>起点</label>
+            <input className={`${fieldClass} text-gray-400`} value={selectedEdge.source} disabled readOnly />
+          </div>
+          <div>
+            <label className={labelClass}>终点</label>
+            <input className={`${fieldClass} text-gray-400`} value={selectedEdge.target} disabled readOnly />
+          </div>
+          {selectedEdge.label && (
+            <div>
+              <label className={labelClass}>标签</label>
+              <input className={fieldClass} value={selectedEdge.label as string} disabled readOnly />
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+          <Button variant="danger" className="w-full" onClick={() => onDeleteEdge(selectedEdge.id)}>
+            删除连线
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (!node) return null
 
   const data = node.data as NodeData
@@ -213,7 +265,7 @@ export default function NodePanel({ node, agents, tools, onChange, onDelete, onC
 
       {!isStartEnd && (
         <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-          <Button variant="danger" className="w-full" onClick={() => onDelete(node.id)}>
+          <Button variant="danger" className="w-full" onClick={() => onDeleteNode(node.id)}>
             删除节点
           </Button>
         </div>
