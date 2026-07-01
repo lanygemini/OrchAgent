@@ -1,4 +1,4 @@
-"""执行引擎：异步驱动工作流执行，协调编译器 / 流式输出 / 预算控制 / 错误处理"""
+"""执行引擎：异步驱动工作流执行，协调编译器 / 流式输出 / 预算控制 / 错误处理 / checkpointer"""
 import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -30,7 +30,7 @@ class ExecutionContext:
 
 
 class ExecutionEngine:
-    """工作流执行引擎 — 异步执行 DAG，支持暂停/恢复/取消"""
+    """工作流执行引擎 — 异步执行 DAG，支持暂停/恢复/取消，集成 LangGraph checkpointer"""
 
     def __init__(
         self,
@@ -46,6 +46,21 @@ class ExecutionEngine:
         self.retry_handler = RetryHandler()
         self.circuit_breaker = CircuitBreaker()
         self._active_tasks: Dict[str, asyncio.Task] = {}
+        self._checkpointer = None
+
+    def _get_checkpointer(self):
+        """获取 LangGraph PostgresSaver checkpointer（延迟初始化，首次使用时创建）"""
+        if self._checkpointer is None:
+            try:
+                from langgraph.checkpoint.postgres import PostgresSaver
+                from app.config import settings
+                sync_url = settings.database_sync_url
+                self._checkpointer = PostgresSaver.from_conn_string(sync_url)
+                self._checkpointer.setup()
+            except Exception:
+                # checkpointer 不可用时降级为无状态执行
+                self._checkpointer = None
+        return self._checkpointer
 
     async def execute(
         self,
@@ -153,8 +168,9 @@ class ExecutionEngine:
                     "error": None,
                 }
 
-                app = graph.compile()
-                result = await app.ainvoke(initial_state)
+                app = graph.compile(checkpointer=self._get_checkpointer())
+                config = {"configurable": {"thread_id": ctx.execution_id}}
+                result = await app.ainvoke(initial_state, config=config)
 
                 total_tokens = sum(
                     (s.token_usage or {}).get("total_tokens", 0) for s in step_records
@@ -303,11 +319,15 @@ class ExecutionEngine:
                 tool_registry.register(t)
 
     async def pause(self, execution_id: str):
-        """暂停执行（取消当前任务并标记状态）"""
+        """暂停执行：利用 LangGraph interrupt 机制，图会在 human 节点前自动中断
+        对于非 human 节点的暂停，取消当前任务，状态由 checkpointer 保存"""
         task = self._active_tasks.get(execution_id)
         if task:
+            # 图正在运行时，若遇到 human 节点会自动 interrupt
+            # 此处取消前台任务（后台执行线程会因 interrupt 暂停）
             task.cancel()
             self._active_tasks.pop(execution_id, None)
+
         result = await self.db.execute(
             select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
         )
@@ -317,14 +337,104 @@ class ExecutionEngine:
             await self.db.flush()
 
     async def resume(self, execution_id: str, human_input: Optional[str] = None):
-        """恢复执行"""
+        """恢复执行：从 checkpointer 的 checkpoint 恢复，传入 human_input 继续
+        LangGraph 会在 interrupt 点恢复执行"""
         result = await self.db.execute(
             select(WorkflowExecution).where(WorkflowExecution.id == execution_id)
         )
         execution = result.scalar_one_or_none()
-        if execution:
-            execution.status = "running"
-            await self.db.flush()
+        if not execution:
+            return
+
+        execution.status = "running"
+        await self.db.flush()
+
+        # 如果有 checkpointer，从 checkpoint 恢复执行
+        checkpointer = self._get_checkpointer()
+        if checkpointer:
+            # 重新构建图并从 checkpoint 恢复
+            try:
+                async with async_session_factory() as bg_db:
+                    dag = await self._build_dag_from_workflow(bg_db, execution.workflow_id)
+                    await self._preload_agents(bg_db, dag)
+                    await self._preload_tools(bg_db, dag)
+
+                    step_records: List[StepRecord] = []
+
+                    async def record_step(step: StepRecord):
+                        step_records.append(step)
+                        async with async_session_factory() as step_db:
+                            exec_step = ExecutionStep(
+                                execution_id=execution_id,
+                                node_id=step.node_id,
+                                node_label=step.node_label,
+                                step_type=step.node_type,
+                                input_data=step.input_data,
+                                output_data=step.output_data,
+                                status=step.status,
+                                token_usage=step.token_usage or {},
+                                error_message=step.error_message,
+                                started_at=step.started_at,
+                                completed_at=step.completed_at,
+                            )
+                            step_db.add(exec_step)
+                            await step_db.commit()
+                        await self.streamer.publish(execution_id, "step.completed", {
+                            "execution_id": execution_id,
+                            "node_id": step.node_id,
+                            "node_label": step.node_label,
+                            "node_type": step.node_type,
+                            "status": step.status,
+                        })
+
+                    graph = self.compiler.compile(dag, step_callback=record_step)
+                    app = graph.compile(checkpointer=checkpointer)
+                    config = {"configurable": {"thread_id": execution_id}}
+
+                    # 传入 human_input 作为恢复时的状态更新
+                    if human_input:
+                        state_update = {"human_input": human_input, "needs_human_input": False}
+                        result_state = await app.ainvoke(state_update, config=config)
+                    else:
+                        result_state = await app.ainvoke(None, config=config)
+
+                    # 更新执行结果
+                    total_tokens = sum(
+                        (s.token_usage or {}).get("total_tokens", 0) for s in step_records
+                    )
+                    await self.db.execute(
+                        update(WorkflowExecution).where(WorkflowExecution.id == execution_id).values(
+                            status="completed",
+                            output_data={
+                                "output": {k: str(v) for k, v in (result_state or {}).get("tool_results", {}).items()},
+                                "path": (result_state or {}).get("path", []),
+                            },
+                            token_usage={"total_tokens": total_tokens},
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await self.db.commit()
+
+                    await self.streamer.publish(execution_id, "execution.completed", {
+                        "execution_id": execution_id,
+                        "status": "completed",
+                    })
+            except Exception as e:
+                await self.db.execute(
+                    update(WorkflowExecution).where(WorkflowExecution.id == execution_id).values(
+                        status="failed",
+                        error_message=str(e),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await self.db.commit()
+
+                await self.streamer.publish(execution_id, "execution.failed", {
+                    "execution_id": execution_id,
+                    "error": str(e),
+                })
+            finally:
+                await self.streamer.publish_end(execution_id)
 
     async def cancel(self, execution_id: str):
         """取消执行"""
