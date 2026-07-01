@@ -69,7 +69,7 @@ export const executionApi = {
   get: (id: string) => apiClient.get(`/executions/${id}`),
   steps: (id: string) => apiClient.get(`/executions/${id}/steps`),
   pause: (id: string) => apiClient.post(`/executions/${id}/pause`),
-  resume: (id: string) => apiClient.post(`/executions/${id}/resume`),
+  resume: (id: string, data?: any) => apiClient.post(`/executions/${id}/resume`, data || {}),
   cancel: (id: string) => apiClient.post(`/executions/${id}/cancel`),
 };
 

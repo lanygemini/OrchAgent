@@ -183,16 +183,22 @@ async def pause_execution(execution_id: str, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/{execution_id}/resume", status_code=200)
-async def resume_execution(execution_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """恢复执行"""
+async def resume_execution(
+    execution_id: str,
+    data: Optional[dict] = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """恢复执行（可传入 human_input 供人工节点使用）"""
     result = await db.execute(select(WorkflowExecution).where(WorkflowExecution.id == execution_id))
     execution = result.scalar_one_or_none()
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
 
+    human_input = (data or {}).get("human_input") if data else None
     engine = _get_engine()
     engine.db = db
-    await engine.resume(execution_id)
+    await engine.resume(execution_id, human_input=human_input)
     return {"message": "执行已恢复", "execution_id": execution_id, "status": "running"}
 
 

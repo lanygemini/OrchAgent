@@ -19,6 +19,7 @@ const statusColors: Record<string, string> = {
   completed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
   failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+  paused: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
 }
 
 export default function ExecutionDetailPage() {
@@ -31,6 +32,9 @@ export default function ExecutionDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [liveSteps, setLiveSteps] = useState<Record<string, ExecutionStep>>({})
   const [firstFetchDone, setFirstFetchDone] = useState(false)
+  const [humanMessage, setHumanMessage] = useState<string | null>(null)
+  const [humanInput, setHumanInput] = useState('')
+  const [resuming, setResuming] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval>>()
 
   const fetchData = useCallback(async () => {
@@ -86,6 +90,11 @@ export default function ExecutionDetailPage() {
         }
         setLiveSteps((prev) => ({ ...prev, [step.node_id]: step }))
       },
+      onHumanRequired: (data: any) => {
+        setHumanMessage(data.message || '工作流暂停，等待人工输入')
+        setExecution((prev) => prev ? { ...prev, status: 'paused' } : null)
+        fetchData()
+      },
       onExecutionCompleted: () => {
         setTimeout(() => fetchData(), 500)
       },
@@ -138,6 +147,34 @@ export default function ExecutionDetailPage() {
     )
   }
 
+  const handlePause = async () => {
+    if (!id) return
+    try { await executionApi.pause(id) } catch {}
+    fetchData()
+  }
+
+  const handleResume = async () => {
+    if (!id) return
+    setResuming(true)
+    try {
+      await executionApi.resume(id, { human_input: humanInput || undefined })
+      setHumanMessage(null)
+      setHumanInput('')
+      fetchData()
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '恢复失败')
+    } finally {
+      setResuming(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!id) return
+    if (!confirm('确定取消此执行？')) return
+    try { await executionApi.cancel(id) } catch {}
+    fetchData()
+  }
+
   const status = execution.status || 'pending'
   const userQuestion = execution.input_data?.input_text || ''
   const outputEntries: [string, string][] = []
@@ -157,9 +194,9 @@ export default function ExecutionDetailPage() {
           </h2>
         </div>
         <div className="flex gap-2">
-          {status === 'running' && <Button variant="secondary">暂停</Button>}
-          {status === 'paused' && <Button variant="primary">继续</Button>}
-          {status === 'running' && <Button variant="danger">取消</Button>}
+          {status === 'running' && <Button variant="secondary" onClick={handlePause}>暂停</Button>}
+          {status === 'paused' && <Button variant="primary" onClick={handleResume} loading={resuming}>继续</Button>}
+          {status === 'running' && <Button variant="danger" onClick={handleCancel}>取消</Button>}
         </div>
       </div>
 
@@ -200,6 +237,27 @@ export default function ExecutionDetailPage() {
           <h3 className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">用户提问</h3>
           <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
             <p className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">{userQuestion}</p>
+          </div>
+        </Card>
+      )}
+
+      {status === 'paused' && (
+        <Card>
+          <h3 className="mb-2 text-sm font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">人工审核</h3>
+          {humanMessage && (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-4 mb-4">
+              <p className="text-sm whitespace-pre-wrap text-gray-900 dark:text-gray-100">{humanMessage}</p>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <input
+              className="flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="输入审批意见..."
+              value={humanInput}
+              onChange={(e) => setHumanInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleResume() } }}
+            />
+            <Button onClick={handleResume} loading={resuming}>提交并继续</Button>
           </div>
         </Card>
       )}
